@@ -4,6 +4,15 @@
 
 This project uses **clauder** for persistent memory across Claude Code sessions.
 
+### CRITICAL: Call get_context at Session Start
+
+**IMPORTANT:** You MUST call `mcp__clauder__get_context` at the START of every session to load:
+- Stored facts and decisions from previous sessions
+- User preferences and coding style guidelines
+- Unread messages from other Claude Code instances
+
+This context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+
 ### Available Tools
 - **mcp__clauder__remember**: Store facts, decisions, or context
 - **mcp__clauder__recall**: Search and retrieve stored facts
@@ -13,7 +22,7 @@ This project uses **clauder** for persistent memory across Claude Code sessions.
 - **mcp__clauder__get_messages**: Check for incoming messages
 
 ### Usage Guidelines
-1. **At session start**: Call `get_context` to load persistent memory
+1. **At session start**: ALWAYS call `get_context` first to load persistent memory
 2. **Store important info**: Use `remember` for decisions, architecture notes, preferences
-3. **Periodic message check**: Call `get_messages` periodically to check for messages from other instances
+3. **Check messages regularly**: The system will notify you of unread messages in tool responses
 4. **Cross-instance communication**: Use `list_instances` and `send_message` to coordinate with other sessions

@@ -282,6 +282,7 @@ func (s *Server) handleToolCall(req *Request) {
 	}
 
 	var result ToolResult
+	skipMessageNotification := false
 
 	switch params.Name {
 	case "remember":
@@ -296,11 +297,17 @@ func (s *Server) handleToolCall(req *Request) {
 		result = s.toolSendMessage(params.Arguments)
 	case "get_messages":
 		result = s.toolGetMessages(params.Arguments)
+		skipMessageNotification = true // Don't remind about messages when they're already reading them
 	default:
 		result = ToolResult{
 			Content: []ContentBlock{{Type: "text", Text: "Unknown tool: " + params.Name}},
 			IsError: true,
 		}
+	}
+
+	// Append unread message notification to non-error results
+	if !result.IsError {
+		result = s.appendNotifications(result, skipMessageNotification)
 	}
 
 	s.sendResult(req.ID, result)

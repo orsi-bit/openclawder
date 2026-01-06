@@ -99,6 +99,10 @@ func (s *Server) toolRecall(args map[string]interface{}) ToolResult {
 
 func (s *Server) toolGetContext(args map[string]interface{}) ToolResult {
 	telemetry.TrackMCPTool("get_context")
+
+	// Check for unread messages first
+	unreadMessages, _ := s.store.GetMessages(s.instanceID, true)
+
 	// Get facts from current directory
 	localFacts, err := s.store.GetFacts("", nil, s.workDir, 50)
 	if err != nil {
@@ -113,6 +117,16 @@ func (s *Server) toolGetContext(args map[string]interface{}) ToolResult {
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# Context for %s\n\n", s.workDir))
+
+	// Show unread messages prominently at the top
+	if len(unreadMessages) > 0 {
+		sb.WriteString(fmt.Sprintf("## ⚠️ Unread Messages (%d)\n\n", len(unreadMessages)))
+		for _, m := range unreadMessages {
+			sb.WriteString(fmt.Sprintf("**From:** %s @ %s\n", m.FromInstance[:8], m.CreatedAt.Format("15:04")))
+			sb.WriteString(fmt.Sprintf("> %s\n\n", m.Content))
+		}
+		sb.WriteString("Use `get_messages` to mark as read and see full details.\n\n")
+	}
 
 	if len(localFacts) > 0 {
 		sb.WriteString("## Local Facts (this directory)\n\n")
@@ -291,4 +305,26 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// getUnreadCount returns the number of unread messages for this instance
+func (s *Server) getUnreadCount() int {
+	messages, err := s.store.GetMessages(s.instanceID, true)
+	if err != nil {
+		return 0
+	}
+	return len(messages)
+}
+
+// appendNotifications adds unread message count to results (except get_messages itself)
+func (s *Server) appendNotifications(result ToolResult, skipMessages bool) ToolResult {
+	if skipMessages {
+		return result
+	}
+	unreadCount := s.getUnreadCount()
+	if unreadCount > 0 && len(result.Content) > 0 {
+		notification := fmt.Sprintf("\n\n---\n📬 You have %d unread message(s). Use `get_messages` to read them.", unreadCount)
+		result.Content[0].Text += notification
+	}
+	return result
 }
