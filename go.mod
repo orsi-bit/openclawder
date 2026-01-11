@@ -3,7 +3,6 @@ module github.com/maorbril/clauder
 go 1.24.5
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/posthog/posthog-go v1.8.2

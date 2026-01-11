@@ -214,7 +214,7 @@ func TestToolSendMessage_Valid(t *testing.T) {
 	defer cleanup()
 
 	// Register target instance
-	_ = server.store.RegisterInstance("target-instance", 123, "/target")
+	_ = server.store.RegisterInstance("target-instance", 123, "/target", "")
 
 	result := server.toolSendMessage(map[string]interface{}{
 		"to":      "target-instance",
@@ -277,7 +277,7 @@ func TestToolSendMessage_TooLarge(t *testing.T) {
 	defer cleanup()
 
 	// Register target instance
-	_ = server.store.RegisterInstance("target-instance", 123, "/target")
+	_ = server.store.RegisterInstance("target-instance", 123, "/target", "")
 
 	largeContent := strings.Repeat("x", MaxMessageSize+1)
 	result := server.toolSendMessage(map[string]interface{}{
@@ -314,8 +314,8 @@ func TestToolGetMessages_WithMessages(t *testing.T) {
 	defer cleanup()
 
 	// Register this instance and a sender
-	_ = server.store.RegisterInstance("test-instance", 1, "/test")
-	_ = server.store.RegisterInstance("sender", 2, "/sender")
+	_ = server.store.RegisterInstance("test-instance", 1, "/test", "")
+	_ = server.store.RegisterInstance("sender", 2, "/sender", "")
 
 	// Send a message to our instance
 	_, _ = server.store.SendMessage("sender", "test-instance", "hello from sender!")
@@ -335,8 +335,8 @@ func TestToolGetMessages_MarksAsRead(t *testing.T) {
 	defer cleanup()
 
 	// Register instances
-	_ = server.store.RegisterInstance("test-instance", 1, "/test")
-	_ = server.store.RegisterInstance("sender", 2, "/sender")
+	_ = server.store.RegisterInstance("test-instance", 1, "/test", "")
+	_ = server.store.RegisterInstance("sender", 2, "/sender", "")
 
 	// Send a message
 	_, _ = server.store.SendMessage("sender", "test-instance", "test message")
@@ -414,8 +414,8 @@ func TestToolListInstances_WithInstances(t *testing.T) {
 	defer cleanup()
 
 	// Register some instances
-	_ = server.store.RegisterInstance("instance-1", 123, "/dir1")
-	_ = server.store.RegisterInstance("instance-2", 456, "/dir2")
+	_ = server.store.RegisterInstance("instance-1", 123, "/dir1", "")
+	_ = server.store.RegisterInstance("instance-2", 456, "/dir2", "")
 
 	result := server.toolListInstances(map[string]interface{}{})
 

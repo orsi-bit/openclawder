@@ -7,7 +7,7 @@ build:
 	CGO_ENABLED=1 go build -tags "$(BUILD_TAGS)" -o $(BINARY_NAME) .
 
 install: build
-	cp $(BINARY_NAME) ~/.bin/$(BINARY_NAME)
+	cp $(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
 
 install-global: build
 	sudo cp $(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)

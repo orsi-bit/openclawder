@@ -18,6 +18,9 @@ type Instance struct {
 	ID            string    `json:"id"`
 	PID           int       `json:"pid"`
 	Directory     string    `json:"directory"`
+	TTY           string    `json:"tty,omitempty"`
+	IsLeader      bool      `json:"is_leader"`
+	IsIdle        bool      `json:"is_idle"`
 	StartedAt     time.Time `json:"started_at"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 }
@@ -40,16 +43,26 @@ type Store interface {
 	SoftDeleteFact(id int64) error
 
 	// Instances
-	RegisterInstance(id string, pid int, directory string) error
+	RegisterInstance(id string, pid int, directory, tty string) error
 	Heartbeat(id string) error
 	UnregisterInstance(id string) error
 	GetInstances() ([]Instance, error)
 	GetInstance(id string) (*Instance, error)
 	CleanupStaleInstances(maxAge time.Duration) error
 
+	// Leader election
+	TryBecomeLeader(id string) (bool, error)
+	ReleaseLeadership(id string) error
+	GetLeader() (*Instance, error)
+
+	// Idle tracking
+	SetIdle(id string, idle bool) error
+	GetIdleInstancesWithUnreadMessages() ([]Instance, error)
+
 	// Messages
 	SendMessage(from, to, content string) (*Message, error)
 	GetMessages(toInstance string, unreadOnly bool) ([]Message, error)
+	GetAllMessages(limit int) ([]Message, error)
 	MarkMessageRead(id int64) error
 
 	// Lifecycle
