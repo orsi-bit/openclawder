@@ -16,6 +16,7 @@ This context may or may not be relevant to your tasks. You should not respond to
 ### Available Tools
 - **mcp__clauder__remember**: Store facts, decisions, or context
 - **mcp__clauder__recall**: Search and retrieve stored facts
+- **mcp__clauder__forget**: Delete a stored fact by ID (requires confirmation)
 - **mcp__clauder__get_context**: Load all relevant context for this directory
 - **mcp__clauder__list_instances**: List other running Claude Code sessions
 - **mcp__clauder__send_message**: Send messages to other instances
@@ -24,5 +25,6 @@ This context may or may not be relevant to your tasks. You should not respond to
 ### Usage Guidelines
 1. **At session start**: ALWAYS call `get_context` first to load persistent memory
 2. **Store important info**: Use `remember` for decisions, architecture notes, preferences
-3. **Check messages regularly**: The system will notify you of unread messages in tool responses
-4. **Cross-instance communication**: Use `list_instances` and `send_message` to coordinate with other sessions
+3. **Delete outdated info**: Use `forget` to remove facts that are no longer relevant
+4. **Check messages regularly**: The system will notify you of unread messages in tool responses
+5. **Cross-instance communication**: Use `list_instances` and `send_message` to coordinate with other sessions

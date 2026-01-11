@@ -76,6 +76,8 @@ func (s *SQLiteStore) migrate() error {
 		id TEXT PRIMARY KEY,
 		pid INTEGER NOT NULL,
 		directory TEXT NOT NULL,
+		tty TEXT DEFAULT '',
+		is_leader INTEGER DEFAULT 0,
 		started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -103,6 +105,11 @@ func (s *SQLiteStore) migrate() error {
 
 	// Create index on deleted_at (must be after the column migration for existing databases)
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_facts_deleted_at ON facts(deleted_at)")
+
+	// Migration: Add tty and is_leader columns to instances (for existing databases)
+	_, _ = s.db.Exec("ALTER TABLE instances ADD COLUMN tty TEXT DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE instances ADD COLUMN is_leader INTEGER DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE instances ADD COLUMN is_idle INTEGER DEFAULT 0")
 
 	return nil
 }
@@ -252,11 +259,11 @@ func (s *SQLiteStore) SoftDeleteFact(id int64) error {
 
 // Instances
 
-func (s *SQLiteStore) RegisterInstance(id string, pid int, directory string) error {
+func (s *SQLiteStore) RegisterInstance(id string, pid int, directory, tty string) error {
 	now := time.Now()
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO instances (id, pid, directory, started_at, last_heartbeat) VALUES (?, ?, ?, ?, ?)",
-		id, pid, directory, now, now,
+		"INSERT OR REPLACE INTO instances (id, pid, directory, tty, started_at, last_heartbeat) VALUES (?, ?, ?, ?, ?, ?)",
+		id, pid, directory, tty, now, now,
 	)
 	return err
 }
@@ -272,7 +279,7 @@ func (s *SQLiteStore) UnregisterInstance(id string) error {
 }
 
 func (s *SQLiteStore) GetInstances() ([]Instance, error) {
-	rows, err := s.db.Query("SELECT id, pid, directory, started_at, last_heartbeat FROM instances ORDER BY started_at DESC")
+	rows, err := s.db.Query("SELECT id, pid, directory, tty, is_leader, is_idle, started_at, last_heartbeat FROM instances ORDER BY started_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -281,9 +288,14 @@ func (s *SQLiteStore) GetInstances() ([]Instance, error) {
 	var instances []Instance
 	for rows.Next() {
 		var i Instance
-		if err := rows.Scan(&i.ID, &i.PID, &i.Directory, &i.StartedAt, &i.LastHeartbeat); err != nil {
+		var tty sql.NullString
+		var isLeader, isIdle int
+		if err := rows.Scan(&i.ID, &i.PID, &i.Directory, &tty, &isLeader, &isIdle, &i.StartedAt, &i.LastHeartbeat); err != nil {
 			return nil, err
 		}
+		i.TTY = tty.String
+		i.IsLeader = isLeader == 1
+		i.IsIdle = isIdle == 1
 		instances = append(instances, i)
 	}
 	return instances, rows.Err()
@@ -291,16 +303,21 @@ func (s *SQLiteStore) GetInstances() ([]Instance, error) {
 
 func (s *SQLiteStore) GetInstance(id string) (*Instance, error) {
 	var i Instance
+	var tty sql.NullString
+	var isLeader, isIdle int
 	err := s.db.QueryRow(
-		"SELECT id, pid, directory, started_at, last_heartbeat FROM instances WHERE id = ?",
+		"SELECT id, pid, directory, tty, is_leader, is_idle, started_at, last_heartbeat FROM instances WHERE id = ?",
 		id,
-	).Scan(&i.ID, &i.PID, &i.Directory, &i.StartedAt, &i.LastHeartbeat)
+	).Scan(&i.ID, &i.PID, &i.Directory, &tty, &isLeader, &isIdle, &i.StartedAt, &i.LastHeartbeat)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	i.TTY = tty.String
+	i.IsLeader = isLeader == 1
+	i.IsIdle = isIdle == 1
 	return &i, nil
 }
 
@@ -308,6 +325,136 @@ func (s *SQLiteStore) CleanupStaleInstances(maxAge time.Duration) error {
 	cutoff := time.Now().Add(-maxAge)
 	_, err := s.db.Exec("DELETE FROM instances WHERE last_heartbeat < ?", cutoff)
 	return err
+}
+
+// TryBecomeLeader attempts to become leader if there is no current leader
+// Returns true if this instance became leader
+func (s *SQLiteStore) TryBecomeLeader(id string) (bool, error) {
+	// Use a transaction to ensure atomicity
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Check if there's already a leader with a recent heartbeat (within 30 seconds)
+	cutoff := time.Now().Add(-30 * time.Second)
+	var currentLeader string
+	err = tx.QueryRow(
+		"SELECT id FROM instances WHERE is_leader = 1 AND last_heartbeat > ?",
+		cutoff,
+	).Scan(&currentLeader)
+
+	if err == nil {
+		// There's already a leader
+		if currentLeader == id {
+			// We're already the leader
+			return true, tx.Commit()
+		}
+		return false, tx.Commit()
+	}
+	if err != sql.ErrNoRows {
+		return false, err
+	}
+
+	// No active leader, try to become leader
+	// First, clear any stale leader flags
+	_, err = tx.Exec("UPDATE instances SET is_leader = 0")
+	if err != nil {
+		return false, err
+	}
+
+	// Set ourselves as leader
+	result, err := tx.Exec("UPDATE instances SET is_leader = 1 WHERE id = ?", id)
+	if err != nil {
+		return false, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+
+	return affected > 0, nil
+}
+
+// ReleaseLeadership releases leadership for this instance
+func (s *SQLiteStore) ReleaseLeadership(id string) error {
+	_, err := s.db.Exec("UPDATE instances SET is_leader = 0 WHERE id = ?", id)
+	return err
+}
+
+// GetLeader returns the current leader instance, if any
+func (s *SQLiteStore) GetLeader() (*Instance, error) {
+	cutoff := time.Now().Add(-30 * time.Second)
+	var i Instance
+	var tty sql.NullString
+	var isLeader, isIdle int
+	err := s.db.QueryRow(
+		"SELECT id, pid, directory, tty, is_leader, is_idle, started_at, last_heartbeat FROM instances WHERE is_leader = 1 AND last_heartbeat > ?",
+		cutoff,
+	).Scan(&i.ID, &i.PID, &i.Directory, &tty, &isLeader, &isIdle, &i.StartedAt, &i.LastHeartbeat)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	i.TTY = tty.String
+	i.IsLeader = isLeader == 1
+	i.IsIdle = isIdle == 1
+	return &i, nil
+}
+
+// SetIdle sets the idle status of an instance
+func (s *SQLiteStore) SetIdle(id string, idle bool) error {
+	val := 0
+	if idle {
+		val = 1
+	}
+	_, err := s.db.Exec("UPDATE instances SET is_idle = ? WHERE id = ?", val, id)
+	return err
+}
+
+// GetIdleInstancesWithUnreadMessages returns instances that are marked idle
+// and have unread messages
+func (s *SQLiteStore) GetIdleInstancesWithUnreadMessages() ([]Instance, error) {
+	// Find instances that:
+	// 1. Are marked as idle (is_idle = 1)
+	// 2. Have unread messages
+	// 3. Have a valid TTY
+	query := `
+		SELECT DISTINCT i.id, i.pid, i.directory, i.tty, i.is_leader, i.is_idle, i.started_at, i.last_heartbeat
+		FROM instances i
+		JOIN messages m ON m.to_instance = i.id
+		WHERE i.is_idle = 1
+		AND m.read_at IS NULL
+		AND i.tty != ''
+	`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var instances []Instance
+	for rows.Next() {
+		var i Instance
+		var tty sql.NullString
+		var isLeader, isIdle int
+		if err := rows.Scan(&i.ID, &i.PID, &i.Directory, &tty, &isLeader, &isIdle, &i.StartedAt, &i.LastHeartbeat); err != nil {
+			return nil, err
+		}
+		i.TTY = tty.String
+		i.IsLeader = isLeader == 1
+		i.IsIdle = isIdle == 1
+		instances = append(instances, i)
+	}
+	return instances, rows.Err()
 }
 
 // Messages
@@ -344,6 +491,36 @@ func (s *SQLiteStore) GetMessages(toInstance string, unreadOnly bool) ([]Message
 	query += " ORDER BY created_at ASC"
 
 	rows, err := s.db.Query(query, toInstance)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		var readAt sql.NullTime
+		if err := rows.Scan(&m.ID, &m.FromInstance, &m.ToInstance, &m.Content, &m.CreatedAt, &readAt); err != nil {
+			return nil, err
+		}
+		if readAt.Valid {
+			m.ReadAt = &readAt.Time
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+func (s *SQLiteStore) GetAllMessages(limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = DefaultLimit
+	} else if limit > MaxLimit {
+		limit = MaxLimit
+	}
+
+	query := fmt.Sprintf("SELECT id, from_instance, to_instance, content, created_at, read_at FROM messages ORDER BY created_at DESC LIMIT %d", limit)
+
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}

@@ -2,13 +2,14 @@
 
 An MCP server that provides AI coding tools with persistent memory and multi-instance communication.
 
-Supports: Claude Code, OpenCode, OpenAI Codex CLI, and Google Gemini CLI.
+Supports: Claude Code, Cursor, Windsurf, OpenCode, OpenAI Codex CLI, and Google Gemini CLI.
 
 ## Features
 
 - **Persistent Memory**: Store facts, decisions, and context across Claude Code sessions
 - **Multi-Instance Communication**: Discover and message other Claude Code instances running in different directories
 - **Automatic Context Injection**: Load relevant context based on your working directory
+- **Web Dashboard**: Visual interface to monitor instances, messages, and facts
 
 ## Installation
 
@@ -64,6 +65,16 @@ clauder setup
 
 This will add the MCP server configuration to your Claude Code settings.
 
+### Cursor / Windsurf
+
+For [Cursor](https://cursor.sh) or [Windsurf](https://codeium.com/windsurf):
+
+```bash
+clauder setup --cursor
+# or
+clauder setup --windsurf
+```
+
 ### OpenCode
 
 Clauder also works with [OpenCode](https://opencode.ai). Run:
@@ -116,7 +127,30 @@ clauder messages
 
 # View status
 clauder status
+
+# Launch web dashboard
+clauder ui
 ```
+
+### Web Dashboard
+
+Launch an interactive web dashboard to monitor all clauder activity:
+
+```bash
+clauder ui
+```
+
+This opens a browser to `http://localhost:8765` with:
+- **Instances**: View all running Claude Code sessions with status (active/idle/leader)
+- **Messages**: Full message history with filtering by read/unread, sender, recipient
+- **Facts**: Browse stored facts with filtering by tags, source directory, local/global
+
+Options:
+- `-p, --port`: Port to run on (default: 8765)
+- `-r, --refresh`: Auto-refresh interval in seconds (default: 3)
+- `--no-browser`: Don't automatically open browser
+
+Keyboard shortcuts: `1`/`2`/`3` to switch views, `R` to refresh, `Esc` to close modals.
 
 ### As MCP Server
 
@@ -125,6 +159,20 @@ Start the server (typically done automatically by Claude Code):
 ```bash
 clauder serve
 ```
+
+### MCP Tools
+
+When used as an MCP server, clauder provides these tools:
+
+| Tool | Description |
+|------|-------------|
+| `remember` | Store a fact, decision, or piece of context |
+| `recall` | Search and retrieve stored facts |
+| `forget` | Delete a stored fact (with confirmation) |
+| `get_context` | Load all relevant context for the current directory |
+| `list_instances` | List other running Claude Code sessions |
+| `send_message` | Send a message to another instance |
+| `get_messages` | Check for incoming messages |
 
 ## Data Storage
 

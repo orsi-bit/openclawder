@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(messagesCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(uiCmd)
 }
 
 func getDataDir() string {
