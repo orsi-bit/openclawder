@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/blevesearch/bleve/v2"
+	_ "modernc.org/sqlite"
 )
 
 // Limits for query bounds
@@ -19,7 +21,15 @@ const (
 )
 
 type SQLiteStore struct {
-	db *sql.DB
+	db      *sql.DB
+	index   bleve.Index
+	dataDir string
+}
+
+// FactDocument represents a fact for Bleve indexing
+type FactDocument struct {
+	Content   string `json:"content"`
+	SourceDir string `json:"source_dir"`
 }
 
 func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
@@ -28,18 +38,117 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "clauder.db")
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	store := &SQLiteStore{db: db}
+	// Open or create Bleve index
+	indexPath := filepath.Join(dataDir, "facts.bleve")
+	index, needsReindex, err := openOrCreateIndex(indexPath)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to open search index: %w", err)
+	}
+
+	store := &SQLiteStore{db: db, index: index, dataDir: dataDir}
 	if err := store.migrate(); err != nil {
+		_ = index.Close()
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// Reindex existing facts if this is a new index
+	if needsReindex {
+		if err := store.reindexAllFacts(); err != nil {
+			_ = index.Close()
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to reindex facts: %w", err)
+		}
+	}
+
 	return store, nil
+}
+
+// openOrCreateIndex opens an existing Bleve index or creates a new one
+func openOrCreateIndex(indexPath string) (bleve.Index, bool, error) {
+	// Try to open existing index
+	index, err := bleve.Open(indexPath)
+	if err == nil {
+		return index, false, nil
+	}
+
+	// Create new index with custom mapping
+	mapping := bleve.NewIndexMapping()
+
+	// Create document mapping for facts
+	factMapping := bleve.NewDocumentMapping()
+
+	// Content field - use English analyzer for better search
+	contentFieldMapping := bleve.NewTextFieldMapping()
+	contentFieldMapping.Analyzer = "en"
+	factMapping.AddFieldMappingsAt("content", contentFieldMapping)
+
+	// SourceDir field - use keyword analyzer (exact match)
+	sourceDirFieldMapping := bleve.NewTextFieldMapping()
+	sourceDirFieldMapping.Analyzer = "keyword"
+	factMapping.AddFieldMappingsAt("source_dir", sourceDirFieldMapping)
+
+	mapping.AddDocumentMapping("fact", factMapping)
+	mapping.DefaultMapping = factMapping
+
+	index, err = bleve.New(indexPath, mapping)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return index, true, nil
+}
+
+// reindexAllFacts indexes all existing facts into Bleve
+func (s *SQLiteStore) reindexAllFacts() error {
+	rows, err := s.db.Query("SELECT id, content, source_dir FROM facts WHERE deleted_at IS NULL")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	batch := s.index.NewBatch()
+	count := 0
+
+	for rows.Next() {
+		var id int64
+		var content, sourceDir string
+		if err := rows.Scan(&id, &content, &sourceDir); err != nil {
+			return err
+		}
+
+		doc := FactDocument{
+			Content:   content,
+			SourceDir: sourceDir,
+		}
+		if err := batch.Index(strconv.FormatInt(id, 10), doc); err != nil {
+			return err
+		}
+
+		count++
+		// Commit in batches of 100
+		if count%100 == 0 {
+			if err := s.index.Batch(batch); err != nil {
+				return err
+			}
+			batch = s.index.NewBatch()
+		}
+	}
+
+	// Commit any remaining documents
+	if batch.Size() > 0 {
+		if err := s.index.Batch(batch); err != nil {
+			return err
+		}
+	}
+
+	return rows.Err()
 }
 
 func (s *SQLiteStore) migrate() error {
@@ -56,21 +165,6 @@ func (s *SQLiteStore) migrate() error {
 
 	CREATE INDEX IF NOT EXISTS idx_facts_source_dir ON facts(source_dir);
 	CREATE INDEX IF NOT EXISTS idx_facts_created_at ON facts(created_at);
-
-	CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(content, content=facts, content_rowid=id);
-
-	CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
-		INSERT INTO facts_fts(rowid, content) VALUES (new.id, new.content);
-	END;
-
-	CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
-		INSERT INTO facts_fts(facts_fts, rowid, content) VALUES('delete', old.id, old.content);
-	END;
-
-	CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
-		INSERT INTO facts_fts(facts_fts, rowid, content) VALUES('delete', old.id, old.content);
-		INSERT INTO facts_fts(rowid, content) VALUES (new.id, new.content);
-	END;
 
 	CREATE TABLE IF NOT EXISTS instances (
 		id TEXT PRIMARY KEY,
@@ -114,14 +208,6 @@ func (s *SQLiteStore) migrate() error {
 	return nil
 }
 
-// sanitizeFTSQuery escapes special FTS5 operators to prevent query injection
-func sanitizeFTSQuery(query string) string {
-	// Escape double quotes by doubling them
-	query = strings.ReplaceAll(query, `"`, `""`)
-	// Wrap the entire query in quotes to treat it as a phrase/literal
-	return `"` + query + `"`
-}
-
 // Facts
 
 func (s *SQLiteStore) AddFact(content string, tags []string, sourceDir string) (*Fact, error) {
@@ -147,6 +233,17 @@ func (s *SQLiteStore) AddFact(content string, tags []string, sourceDir string) (
 		return nil, err
 	}
 
+	// Index in Bleve
+	doc := FactDocument{
+		Content:   content,
+		SourceDir: sourceDir,
+	}
+	if err := s.index.Index(strconv.FormatInt(id, 10), doc); err != nil {
+		// Log error but don't fail - SQLite is the source of truth
+		// The fact is stored, search just won't find it until reindex
+		_ = err
+	}
+
 	return &Fact{
 		ID:        id,
 		Content:   content,
@@ -158,53 +255,166 @@ func (s *SQLiteStore) AddFact(content string, tags []string, sourceDir string) (
 }
 
 func (s *SQLiteStore) GetFacts(query string, tags []string, sourceDir string, limit int) ([]Fact, error) {
-	var args []interface{}
-	var conditions []string
-
-	// Always exclude soft-deleted facts
-	conditions = append(conditions, "f.deleted_at IS NULL")
-
-	baseQuery := "SELECT f.id, f.content, f.tags, f.source_dir, f.created_at, f.updated_at FROM facts f"
-
-	if query != "" {
-		baseQuery = "SELECT f.id, f.content, f.tags, f.source_dir, f.created_at, f.updated_at FROM facts f JOIN facts_fts fts ON f.id = fts.rowid WHERE fts.content MATCH ?"
-		// Sanitize FTS query to prevent operator injection
-		args = append(args, sanitizeFTSQuery(query))
-	}
-
-	if sourceDir != "" {
-		conditions = append(conditions, "f.source_dir = ?")
-		args = append(args, sourceDir)
-	}
-
-	if len(tags) > 0 {
-		for _, tag := range tags {
-			// Escape any quotes in tag for LIKE pattern safety
-			safeTag := strings.ReplaceAll(tag, `"`, `""`)
-			conditions = append(conditions, "f.tags LIKE ?")
-			args = append(args, "%\""+safeTag+"\"%")
-		}
-	}
-
-	if len(conditions) > 0 {
-		if query != "" {
-			baseQuery += " AND " + strings.Join(conditions, " AND ")
-		} else {
-			baseQuery += " WHERE " + strings.Join(conditions, " AND ")
-		}
-	}
-
-	baseQuery += " ORDER BY f.updated_at DESC"
-
 	// Apply limit bounds
 	if limit <= 0 {
 		limit = DefaultLimit
 	} else if limit > MaxLimit {
 		limit = MaxLimit
 	}
-	baseQuery += fmt.Sprintf(" LIMIT %d", limit)
 
-	rows, err := s.db.Query(baseQuery, args...)
+	// If there's a search query, use Bleve for relevance-ranked search
+	if query != "" {
+		return s.searchFactsWithBleve(query, tags, sourceDir, limit)
+	}
+
+	// No query - use SQLite directly (list all facts with filters)
+	return s.listFacts(tags, sourceDir, limit)
+}
+
+// searchFactsWithBleve uses Bleve for relevance-ranked full-text search
+func (s *SQLiteStore) searchFactsWithBleve(query string, tags []string, sourceDir string, limit int) ([]Fact, error) {
+	// Build Bleve query - use MatchQuery for literal matching (doesn't interpret operators)
+	searchQuery := bleve.NewMatchQuery(query)
+	searchQuery.SetField("content")
+
+	// Create search request
+	searchRequest := bleve.NewSearchRequest(searchQuery)
+	searchRequest.Size = limit * 2 // Fetch extra to account for post-filtering
+
+	// If filtering by sourceDir, add it to the query
+	if sourceDir != "" {
+		sourceDirQuery := bleve.NewMatchQuery(sourceDir)
+		sourceDirQuery.SetField("source_dir")
+		combinedQuery := bleve.NewConjunctionQuery(searchQuery, sourceDirQuery)
+		searchRequest = bleve.NewSearchRequest(combinedQuery)
+		searchRequest.Size = limit * 2
+	}
+
+	// Execute search
+	searchResult, err := s.index.Search(searchRequest)
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
+	}
+
+	if len(searchResult.Hits) == 0 {
+		return []Fact{}, nil
+	}
+
+	// Collect IDs in ranked order
+	ids := make([]int64, 0, len(searchResult.Hits))
+	for _, hit := range searchResult.Hits {
+		id, err := strconv.ParseInt(hit.ID, 10, 64)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+
+	if len(ids) == 0 {
+		return []Fact{}, nil
+	}
+
+	// Fetch facts from SQLite by IDs, preserving Bleve ranking order
+	facts, err := s.getFactsByIDs(ids, tags)
+	if err != nil {
+		return nil, err
+	}
+
+	// Trim to limit
+	if len(facts) > limit {
+		facts = facts[:limit]
+	}
+
+	return facts, nil
+}
+
+// getFactsByIDs fetches facts by IDs while preserving order and applying tag filters
+func (s *SQLiteStore) getFactsByIDs(ids []int64, tags []string) ([]Fact, error) {
+	if len(ids) == 0 {
+		return []Fact{}, nil
+	}
+
+	// Build query with IN clause
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, content, tags, source_dir, created_at, updated_at FROM facts WHERE id IN (%s) AND deleted_at IS NULL",
+		strings.Join(placeholders, ","),
+	)
+
+	// Add tag filters
+	for _, tag := range tags {
+		safeTag := strings.ReplaceAll(tag, `"`, `""`)
+		query += " AND tags LIKE ?"
+		args = append(args, "%\""+safeTag+"\"%")
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	// Build a map for reordering
+	factMap := make(map[int64]Fact)
+	for rows.Next() {
+		var f Fact
+		var tagsJSON string
+		if err := rows.Scan(&f.ID, &f.Content, &tagsJSON, &f.SourceDir, &f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(tagsJSON), &f.Tags); err != nil {
+			f.Tags = []string{}
+		}
+		factMap[f.ID] = f
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reorder to match Bleve ranking
+	facts := make([]Fact, 0, len(factMap))
+	for _, id := range ids {
+		if f, ok := factMap[id]; ok {
+			facts = append(facts, f)
+		}
+	}
+
+	return facts, nil
+}
+
+// listFacts returns facts without search query (simple list with filters)
+func (s *SQLiteStore) listFacts(tags []string, sourceDir string, limit int) ([]Fact, error) {
+	var args []any
+	var conditions []string
+
+	conditions = append(conditions, "deleted_at IS NULL")
+
+	if sourceDir != "" {
+		conditions = append(conditions, "source_dir = ?")
+		args = append(args, sourceDir)
+	}
+
+	for _, tag := range tags {
+		safeTag := strings.ReplaceAll(tag, `"`, `""`)
+		conditions = append(conditions, "tags LIKE ?")
+		args = append(args, "%\""+safeTag+"\"%")
+	}
+
+	query := "SELECT id, content, tags, source_dir, created_at, updated_at FROM facts"
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY updated_at DESC"
+	query += fmt.Sprintf(" LIMIT %d", limit)
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +428,6 @@ func (s *SQLiteStore) GetFacts(query string, tags []string, sourceDir string, li
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(tagsJSON), &f.Tags); err != nil {
-			// If tags are corrupted, initialize to empty slice
 			f.Tags = []string{}
 		}
 		facts = append(facts, f)
@@ -254,7 +463,14 @@ func (s *SQLiteStore) DeleteFact(id int64) error {
 
 func (s *SQLiteStore) SoftDeleteFact(id int64) error {
 	_, err := s.db.Exec("UPDATE facts SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL", time.Now(), id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Remove from Bleve index
+	_ = s.index.Delete(strconv.FormatInt(id, 10))
+
+	return nil
 }
 
 // Instances
@@ -547,5 +763,8 @@ func (s *SQLiteStore) MarkMessageRead(id int64) error {
 }
 
 func (s *SQLiteStore) Close() error {
+	if s.index != nil {
+		_ = s.index.Close()
+	}
 	return s.db.Close()
 }

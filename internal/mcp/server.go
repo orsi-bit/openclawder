@@ -14,7 +14,7 @@ import (
 const (
 	ProtocolVersion = "2024-11-05"
 	ServerName      = "clauder"
-	ServerVersion   = "0.1.0" // Keep in sync with cmd.Version
+	ServerVersion   = "0.5.0" // Keep in sync with cmd.Version
 )
 
 type Server struct {
@@ -154,6 +154,10 @@ func (s *Server) handleRequest(req *Request) {
 		s.handleToolsList(req)
 	case "tools/call":
 		s.handleToolCall(req)
+	case "resources/list":
+		s.sendResult(req.ID, map[string]interface{}{"resources": []interface{}{}})
+	case "prompts/list":
+		s.sendResult(req.ID, map[string]interface{}{"prompts": []interface{}{}})
 	case "ping":
 		s.sendResult(req.ID, map[string]interface{}{})
 	default:

@@ -120,28 +120,39 @@ func TestGetFacts_ByTags(t *testing.T) {
 	}
 }
 
-func TestGetFacts_FTSSpecialChars(t *testing.T) {
+func TestGetFacts_BleveSearch(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	_, _ = store.AddFact("normal fact", nil, "/project")
-	_, _ = store.AddFact("fact with OR keyword", nil, "/project")
+	_, _ = store.AddFact("golang programming language", nil, "/project")
+	_, _ = store.AddFact("python scripting language", nil, "/project")
+	_, _ = store.AddFact("rust systems programming", nil, "/project")
 
-	// Query with FTS operator should be safely escaped
-	facts, err := store.GetFacts("OR", nil, "", 10)
+	// Search for "golang" should find the first fact
+	facts, err := store.GetFacts("golang", nil, "", 10)
 	if err != nil {
-		t.Fatalf("GetFacts with special chars failed: %v", err)
+		t.Fatalf("GetFacts failed: %v", err)
 	}
-	// Should find the fact containing "OR" literally, not trigger FTS OR operator
 	if len(facts) != 1 {
-		t.Errorf("expected 1 fact, got %d", len(facts))
+		t.Errorf("expected 1 fact for 'golang', got %d", len(facts))
 	}
 
-	// Test with quotes
-	_, _ = store.AddFact(`fact with "quotes"`, nil, "/project")
-	_, err = store.GetFacts(`"quotes"`, nil, "", 10)
+	// Search for "programming" should find 2 facts
+	facts, err = store.GetFacts("programming", nil, "", 10)
 	if err != nil {
-		t.Fatalf("GetFacts with quotes failed: %v", err)
+		t.Fatalf("GetFacts failed: %v", err)
+	}
+	if len(facts) != 2 {
+		t.Errorf("expected 2 facts for 'programming', got %d", len(facts))
+	}
+
+	// Search for "language" should find 2 facts (golang and python)
+	facts, err = store.GetFacts("language", nil, "", 10)
+	if err != nil {
+		t.Fatalf("GetFacts failed: %v", err)
+	}
+	if len(facts) != 2 {
+		t.Errorf("expected 2 facts for 'language', got %d", len(facts))
 	}
 }
 
@@ -394,22 +405,3 @@ func TestNewSQLiteStore_CreatesDirectory(t *testing.T) {
 	}
 }
 
-func TestSanitizeFTSQuery(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"simple", `"simple"`},
-		{"with spaces", `"with spaces"`},
-		{`with "quotes"`, `"with ""quotes"""`},
-		{"OR AND NOT", `"OR AND NOT"`},
-		{"test*", `"test*"`},
-	}
-
-	for _, tt := range tests {
-		result := sanitizeFTSQuery(tt.input)
-		if result != tt.expected {
-			t.Errorf("sanitizeFTSQuery(%q) = %q, want %q", tt.input, result, tt.expected)
-		}
-	}
-}
