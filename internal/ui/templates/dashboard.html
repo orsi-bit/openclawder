@@ -625,6 +625,311 @@
             color: var(--success);
         }
 
+        /* Map View */
+        .map-layout {
+            display: flex;
+            gap: 1.5rem;
+            height: calc(100vh - 4rem);
+        }
+
+        .hex-container {
+            flex: 1;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            overflow: auto;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .hex-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            border-radius: var(--radius-lg);
+        }
+
+        .hex-grid {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100%;
+            position: relative;
+            z-index: 1;
+            padding: 2rem;
+            gap: 0;
+        }
+
+        .hex-row {
+            display: flex;
+            justify-content: center;
+            margin-top: -30px;
+        }
+
+        .hex-row:first-child {
+            margin-top: 0;
+        }
+
+        .hex {
+            width: 140px;
+            height: 160px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 0 5px;
+        }
+
+        .hex-inner {
+            width: 100%;
+            height: 100%;
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .hex:hover .hex-inner {
+            background: var(--bg-card-hover);
+            transform: scale(1.05);
+        }
+
+        .hex.active .hex-inner {
+            border-color: var(--secondary);
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.3), inset 0 0 20px rgba(6, 182, 212, 0.1);
+        }
+
+        .hex.needs-attention .hex-inner {
+            border-color: var(--warning);
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.3), inset 0 0 20px rgba(245, 158, 11, 0.1);
+            animation: pulse-attention 2s ease-in-out infinite;
+        }
+
+        .hex.inactive .hex-inner {
+            border-color: var(--muted);
+            opacity: 0.6;
+        }
+
+        @keyframes pulse-attention {
+            0%, 100% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.3), inset 0 0 20px rgba(245, 158, 11, 0.1); }
+            50% { box-shadow: 0 0 30px rgba(245, 158, 11, 0.5), inset 0 0 30px rgba(245, 158, 11, 0.2); }
+        }
+
+        .hex-badge {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 24px;
+            height: 24px;
+            background: var(--primary);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: white;
+            z-index: 2;
+        }
+
+        .hex-project {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text);
+            text-align: center;
+            margin-bottom: 0.25rem;
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .hex-status {
+            font-size: 0.6875rem;
+            padding: 0.125rem 0.5rem;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.025em;
+        }
+
+        .hex-status.working {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success-light);
+        }
+
+        .hex-status.attention {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning-light);
+        }
+
+        .hex-status.offline {
+            background: rgba(100, 116, 139, 0.2);
+            color: var(--muted-light);
+        }
+
+        .hex-time {
+            font-size: 0.6875rem;
+            color: var(--muted);
+            margin-top: 0.25rem;
+        }
+
+        /* Session Panel */
+        .session-panel {
+            width: 380px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .session-header {
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .session-title {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .session-stats {
+            font-size: 0.8125rem;
+            color: var(--muted);
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.75rem;
+        }
+
+        .session-card {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.875rem;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 0.5rem;
+            background: transparent;
+            border: 1px solid transparent;
+        }
+
+        .session-card:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .session-card.selected {
+            background: rgba(139, 92, 246, 0.1);
+            border-color: var(--primary);
+        }
+
+        .session-card.needs-attention {
+            border-left: 3px solid var(--warning);
+        }
+
+        .session-badge {
+            width: 28px;
+            height: 28px;
+            background: var(--bg-card-hover);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .session-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .session-dot.working {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .session-dot.attention {
+            background: var(--warning);
+            box-shadow: 0 0 8px var(--warning);
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+
+        .session-dot.offline {
+            background: var(--muted);
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .session-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .session-name {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .session-name .attention-label {
+            font-size: 0.6875rem;
+            padding: 0.125rem 0.375rem;
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning-light);
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .session-path {
+            font-size: 0.75rem;
+            color: var(--muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .session-time {
+            font-size: 0.6875rem;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -747,6 +1052,54 @@
             overflow-y: auto;
         }
 
+        .modal-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .modal-message {
+            background: var(--bg);
+            padding: 0.75rem;
+            border-radius: var(--radius-sm);
+            border-left: 2px solid var(--border);
+        }
+
+        .modal-message.unread {
+            border-left-color: var(--primary);
+            background: rgba(139, 92, 246, 0.05);
+        }
+
+        .modal-message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.375rem;
+        }
+
+        .modal-message-from {
+            font-weight: 500;
+            font-size: 0.8125rem;
+            color: var(--text);
+        }
+
+        .modal-message-time {
+            font-size: 0.6875rem;
+            color: var(--muted);
+        }
+
+        .modal-message-preview {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
         /* Loading */
         .loading {
             display: flex;
@@ -821,7 +1174,12 @@
             </div>
 
             <nav class="nav">
-                <div class="nav-item active" data-view="instances">
+                <div class="nav-item active" data-view="map">
+                    <span class="nav-icon">&#11042;</span>
+                    <span>Map</span>
+                    <span class="nav-badge" id="nav-map-count">0</span>
+                </div>
+                <div class="nav-item" data-view="instances">
                     <span class="nav-icon">&#9673;</span>
                     <span>Instances</span>
                     <span class="nav-badge" id="nav-instances-count">0</span>
@@ -863,8 +1221,28 @@
 
         <!-- Main Content -->
         <main class="main">
+            <!-- Map View -->
+            <div class="view" id="map-view">
+                <div class="map-layout">
+                    <div class="hex-container">
+                        <div class="hex-grid" id="hex-grid">
+                            <div class="loading"><div class="spinner"></div> Loading map...</div>
+                        </div>
+                    </div>
+                    <div class="session-panel">
+                        <div class="session-header">
+                            <div class="session-title">All Sessions</div>
+                            <div class="session-stats" id="session-stats">0 sessions, 0 working</div>
+                        </div>
+                        <div class="session-list" id="session-list">
+                            <!-- Session cards rendered by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Instances View -->
-            <div class="view" id="instances-view">
+            <div class="view" id="instances-view" style="display: none;">
                 <div class="page-header">
                     <div>
                         <h1 class="page-title">Instances</h1>
@@ -986,11 +1364,12 @@
         const REFRESH_INTERVAL = {{.RefreshInterval}} * 1000;
         const WORK_DIR = '{{.WorkDir}}';
 
-        let currentView = 'instances';
+        let currentView = 'map';
         let allData = { instances: [], messages: [], facts: [], stats: {} };
         let instanceFilter = 'all';
         let messageFilter = 'all';
         let factFilter = 'all';
+        let selectedInstanceIndex = -1;
 
         // Navigation
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -1021,10 +1400,11 @@
         }
 
         function updateStats() {
-            document.getElementById('stat-instances').textContent = allData.stats.totalInstances;
+            document.getElementById('stat-instances').textContent = allData.stats.workingInstances || 0;
             document.getElementById('stat-unread').textContent = allData.stats.unreadMessages;
             document.getElementById('stat-facts').textContent = allData.stats.totalFacts;
             document.getElementById('stat-local').textContent = allData.stats.localFacts;
+            document.getElementById('nav-map-count').textContent = allData.stats.totalInstances;
             document.getElementById('nav-instances-count').textContent = allData.stats.totalInstances;
             document.getElementById('nav-unread-count').textContent = allData.stats.unreadMessages;
             document.getElementById('nav-facts-count').textContent = allData.stats.totalFacts;
@@ -1058,10 +1438,143 @@
 
         function renderCurrentView() {
             switch (currentView) {
+                case 'map': renderMap(); break;
                 case 'instances': renderInstances(); break;
                 case 'messages': renderMessages(); break;
                 case 'facts': renderFacts(); break;
             }
+        }
+
+        // Map View
+        function renderMap() {
+            const hexGrid = document.getElementById('hex-grid');
+            const sessionList = document.getElementById('session-list');
+            const sessionStats = document.getElementById('session-stats');
+            const instances = allData.instances;
+
+            // Update stats
+            const working = instances.filter(i => i.isActive && !i.isIdle).length;
+            sessionStats.textContent = `${instances.length} sessions, ${working} working`;
+
+            if (instances.length === 0) {
+                hexGrid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">&#11042;</div>
+                        <div class="empty-title">No active sessions</div>
+                        <div class="empty-description">Start a Claude Code session to see it here</div>
+                    </div>`;
+                sessionList.innerHTML = '';
+                return;
+            }
+
+            // Render hex grid in honeycomb pattern (diamond shape)
+            const n = instances.length;
+            let rowSizes = [];
+
+            // Create diamond-like distribution
+            if (n <= 3) {
+                rowSizes = [n];
+            } else if (n <= 5) {
+                rowSizes = [2, n - 2 > 0 ? n - 2 : 1, n > 4 ? 1 : 0].filter(x => x > 0);
+            } else if (n <= 7) {
+                rowSizes = [2, 3, 2];
+                if (n > 7) rowSizes = [2, 3, 2];
+            } else {
+                // For larger sets, build outward from center
+                const mid = Math.ceil(Math.sqrt(n));
+                let remaining = n;
+                let size = 1;
+                let growing = true;
+                while (remaining > 0) {
+                    const take = Math.min(size, remaining);
+                    rowSizes.push(take);
+                    remaining -= take;
+                    if (growing) {
+                        size++;
+                        if (size > mid) growing = false;
+                    } else {
+                        size = Math.max(1, size - 1);
+                    }
+                }
+            }
+
+            const rows = [];
+            let idx = 0;
+
+            rowSizes.forEach((rowSize, rowNum) => {
+                const rowInstances = instances.slice(idx, idx + rowSize);
+
+                const hexes = rowInstances.map((inst, i) => {
+                    const globalIdx = idx + i;
+                    const statusClass = inst.needsAttention ? 'needs-attention' : (inst.isActive ? 'active' : 'inactive');
+                    const statusText = inst.needsAttention ? 'Attention' : (inst.isActive ? 'Working' : 'Offline');
+                    const statusBadgeClass = inst.needsAttention ? 'attention' : (inst.isActive ? 'working' : 'offline');
+                    const badgeNum = globalIdx < 9 ? globalIdx + 1 : '';
+
+                    return `
+                        <div class="hex ${statusClass}" data-index="${globalIdx}" onclick="selectInstance(${globalIdx})">
+                            ${badgeNum ? `<div class="hex-badge">${badgeNum}</div>` : ''}
+                            <div class="hex-inner">
+                                <div class="hex-project">${escapeHtml(inst.projectName)}</div>
+                                <div class="hex-status ${statusBadgeClass}">${statusText}</div>
+                                <div class="hex-time">${inst.heartbeatAge}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                rows.push(`<div class="hex-row">${hexes}</div>`);
+                idx += rowSize;
+            });
+
+            hexGrid.innerHTML = rows.join('');
+
+            // Render session cards
+            sessionList.innerHTML = instances.map((inst, idx) => {
+                const dotClass = inst.needsAttention ? 'attention' : (inst.isActive ? 'working' : 'offline');
+                const isSelected = idx === selectedInstanceIndex;
+                const badgeNum = idx < 9 ? idx + 1 : '-';
+                const attentionText = inst.attentionReason || 'Needs attention';
+
+                return `
+                    <div class="session-card ${inst.needsAttention ? 'needs-attention' : ''} ${isSelected ? 'selected' : ''}"
+                         data-index="${idx}" onclick="selectInstance(${idx})">
+                        <div class="session-badge">${badgeNum}</div>
+                        <div class="session-dot ${dotClass}"></div>
+                        <div class="session-info">
+                            <div class="session-name">
+                                ${escapeHtml(inst.projectName)}
+                                ${inst.needsAttention ? `<span class="attention-label">${escapeHtml(attentionText)}</span>` : ''}
+                            </div>
+                            <div class="session-path">${escapeHtml(inst.shortDir)}</div>
+                        </div>
+                        <div class="session-time">${inst.heartbeatAge}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // Highlight selected
+            updateSelection();
+        }
+
+        function selectInstance(index) {
+            selectedInstanceIndex = index;
+            updateSelection();
+            // Show instance details in modal
+            if (index >= 0 && index < allData.instances.length) {
+                showInstanceDetails(allData.instances[index]);
+            }
+        }
+
+        function updateSelection() {
+            // Update hex selection
+            document.querySelectorAll('.hex').forEach((hex, idx) => {
+                hex.classList.toggle('selected', idx === selectedInstanceIndex);
+            });
+            // Update card selection
+            document.querySelectorAll('.session-card').forEach((card, idx) => {
+                card.classList.toggle('selected', idx === selectedInstanceIndex);
+            });
         }
 
         // Instances
@@ -1252,27 +1765,50 @@
         }
 
         function showInstanceDetails(inst) {
-            showModal('Instance Details', `
-                <div class="modal-field">
-                    <div class="modal-label">Instance ID</div>
-                    <div class="modal-value">${inst.id}</div>
-                </div>
-                <div class="modal-field">
-                    <div class="modal-label">Directory</div>
-                    <div class="modal-value">${inst.directory}</div>
-                </div>
+            // Build recent messages section
+            let messagesHtml = '';
+            if (inst.recentMessages && inst.recentMessages.length > 0) {
+                messagesHtml = `
+                    <div class="modal-field">
+                        <div class="modal-label">Recent Activity</div>
+                        <div class="modal-messages">
+                            ${inst.recentMessages.map(msg => `
+                                <div class="modal-message ${msg.isRead ? '' : 'unread'}">
+                                    <div class="modal-message-header">
+                                        <span class="modal-message-from">${msg.toInstance === inst.id ? 'From' : 'To'}: ${escapeHtml(msg.toInstance === inst.id ? msg.shortFromDir : msg.shortToDir)}</span>
+                                        <span class="modal-message-time">${msg.age}</span>
+                                    </div>
+                                    <div class="modal-message-preview">${escapeHtml(msg.preview)}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            showModal(`${escapeHtml(inst.projectName)}`, `
                 <div class="modal-field">
                     <div class="modal-label">Status</div>
                     <div class="modal-value">
                         ${inst.isLeader ? '<span class="badge badge-leader">Leader</span> ' : ''}
                         ${inst.isIdle ? '<span class="badge badge-idle">Idle</span> ' : ''}
-                        ${inst.isActive ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>'}
+                        ${inst.isActive ? '<span class="badge badge-active">Working</span>' : '<span class="badge badge-inactive">Offline</span>'}
+                        ${inst.needsAttention ? `<span class="badge badge-idle">${escapeHtml(inst.attentionReason)}</span>` : ''}
                     </div>
+                </div>
+                <div class="modal-field">
+                    <div class="modal-label">Directory</div>
+                    <div class="modal-value" style="font-size: 0.8125rem;">${inst.directory}</div>
                 </div>
                 <div class="modal-field">
                     <div class="modal-label">Last Heartbeat</div>
                     <div class="modal-value">${inst.heartbeatAge}</div>
                 </div>
+                <div class="modal-field">
+                    <div class="modal-label">Instance ID</div>
+                    <div class="modal-value" style="font-size: 0.75rem; color: var(--muted);">${inst.id}</div>
+                </div>
+                ${messagesHtml}
             `);
         }
 
@@ -1332,13 +1868,30 @@
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            // Don't handle shortcuts when typing in inputs
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
             if (e.key === 'Escape') closeModal();
             if (e.key === 'r' || e.key === 'R') {
                 if (!e.ctrlKey && !e.metaKey) fetchData();
             }
-            if (e.key === '1') switchView('instances');
-            if (e.key === '2') switchView('messages');
-            if (e.key === '3') switchView('facts');
+
+            // Number keys 1-9 select instances in map view
+            if (currentView === 'map' && e.key >= '1' && e.key <= '9') {
+                const idx = parseInt(e.key) - 1;
+                if (idx < allData.instances.length) {
+                    selectInstance(idx);
+                }
+                return;
+            }
+
+            // Alt+number for view switching
+            if (e.altKey) {
+                if (e.key === '1' || e.key === 'm') switchView('map');
+                if (e.key === '2' || e.key === 'i') switchView('instances');
+                if (e.key === '3' || e.key === 'e') switchView('messages');
+                if (e.key === '4' || e.key === 'f') switchView('facts');
+            }
         });
 
         document.getElementById('modal').addEventListener('click', (e) => {
