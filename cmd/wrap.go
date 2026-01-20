@@ -41,6 +41,8 @@ type inputTracker struct {
 	mu            sync.Mutex
 	buffer        []byte
 	lastKeystroke time.Time
+	inEscSeq      bool      // true if we're in the middle of an escape sequence
+	escSeqStart   time.Time // when the escape sequence started
 }
 
 func newInputTracker() *inputTracker {
@@ -53,6 +55,29 @@ func newInputTracker() *inputTracker {
 func (t *inputTracker) ProcessByte(b byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Handle escape sequences - ESC starts a sequence, skip until we see a letter
+	// Escape sequences are typically: ESC [ <params> <letter>
+	// e.g., ESC[A (arrow up), ESC[1;5C (ctrl+right), etc.
+	if b == 0x1b { // ESC
+		t.inEscSeq = true
+		t.escSeqStart = time.Now()
+		return // Don't update lastKeystroke for terminal escape sequences
+	}
+
+	if t.inEscSeq {
+		// Escape sequences timeout after 100ms (in case of incomplete sequence)
+		if time.Since(t.escSeqStart) > 100*time.Millisecond {
+			t.inEscSeq = false
+		} else if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
+			// Letter or ~ terminates the escape sequence
+			t.inEscSeq = false
+			return // Don't update lastKeystroke for terminal escape sequences
+		} else {
+			// Middle of escape sequence (like '[' or numbers)
+			return // Don't update lastKeystroke for terminal escape sequences
+		}
+	}
 
 	t.lastKeystroke = time.Now()
 
@@ -189,7 +214,7 @@ func (w *messageWatcher) inject(text string) {
 		_, _ = w.ptmx.WriteString(string(ch))
 		time.Sleep(5 * time.Millisecond)
 	}
-	// Send Enter (just CR - terminal Enter key)
+	// Send Enter (CR - what terminal Enter key sends in raw mode)
 	time.Sleep(10 * time.Millisecond)
 	_, _ = w.ptmx.WriteString("\r")
 }
