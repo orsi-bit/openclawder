@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSL https://raw.githubusercontent.com/MaorBril/clauder/main/install.sh | sh
 
 REPO="MaorBril/clauder"
-INSTALL_DIR="${CLAUDER_INSTALL_DIR:-/usr/local/bin/clauder}"
+INSTALL_DIR="${CLAUDER_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS
 detect_os() {
