@@ -279,17 +279,11 @@ func (s *SQLiteStore) migrate() error {
 
 	CREATE TABLE IF NOT EXISTS instances (
 		id TEXT PRIMARY KEY,
-		directory_id TEXT NOT NULL DEFAULT '',
-		name TEXT NOT NULL DEFAULT '',
 		pid INTEGER NOT NULL,
 		directory TEXT NOT NULL,
-		tty TEXT DEFAULT '',
-		is_leader INTEGER DEFAULT 0,
 		started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
-
-	CREATE INDEX IF NOT EXISTS idx_instances_directory_id ON instances(directory_id);
 
 	CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
