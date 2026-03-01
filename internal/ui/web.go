@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -117,13 +118,43 @@ type StatsData struct {
 	LocalFacts       int `json:"localFacts"`
 }
 
+// FactStatsAPIResponse represents the fact statistics API response
+type FactStatsAPIResponse struct {
+	TotalFacts   int             `json:"totalFacts"`
+	TotalSize    int             `json:"totalSize"`
+	DeletedFacts int             `json:"deletedFacts"`
+	DeletedSize  int             `json:"deletedSize"`
+	Directories  []DirStatsEntry `json:"directories"`
+}
+
+// DirStatsEntry represents per-directory statistics
+type DirStatsEntry struct {
+	Directory string `json:"directory"`
+	ShortDir  string `json:"shortDir"`
+	Count     int    `json:"count"`
+	Size      int    `json:"size"`
+	Oldest    string `json:"oldest"`
+	Newest    string `json:"newest"`
+	OldestAge string `json:"oldestAge"`
+	NewestAge string `json:"newestAge"`
+}
+
 // Start starts the web server on the given port
 func (ws *WebServer) Start(port int) error {
 	http.HandleFunc("/", ws.handleDashboard)
 	http.HandleFunc("/api/data", ws.handleAPIData)
 	http.HandleFunc("/api/launch", ws.handleLaunch)
 	http.HandleFunc("/api/facts/delete", ws.handleDeleteFact)
+	http.HandleFunc("/api/facts/stats", ws.handleFactStats)
+	http.HandleFunc("/api/facts/create", ws.handleCreateFact)
+	http.HandleFunc("/api/facts/update", ws.handleUpdateFact)
+	http.HandleFunc("/api/facts/bulk-delete", ws.handleBulkDeleteFacts)
+	http.HandleFunc("/api/facts/purge", ws.handlePurgeDeleted)
 	http.HandleFunc("/api/terminal", ws.handleTerminal)
+	http.HandleFunc("/api/analytics", ws.handleAnalytics)
+	http.HandleFunc("/api/graph", ws.handleGraph)
+	http.HandleFunc("/api/facts/import", ws.handleImportFacts)
+	http.HandleFunc("/api/context-window", ws.handleContextWindow)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("Starting web dashboard at http://localhost%s", addr)
@@ -247,6 +278,464 @@ func (ws *WebServer) handleDeleteFact(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func (ws *WebServer) handleFactStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := ws.store.GetFactStats()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get fact stats: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	dirs := make([]DirStatsEntry, 0, len(stats.ByDirectory))
+	for dir, ds := range stats.ByDirectory {
+		dirs = append(dirs, DirStatsEntry{
+			Directory: dir,
+			ShortDir:  shortenPath(dir, 30),
+			Count:     ds.Count,
+			Size:      ds.Size,
+			Oldest:    ds.Oldest.Format(time.RFC3339),
+			Newest:    ds.Newest.Format(time.RFC3339),
+			OldestAge: formatDuration(time.Since(ds.Oldest)),
+			NewestAge: formatDuration(time.Since(ds.Newest)),
+		})
+	}
+
+	resp := FactStatsAPIResponse{
+		TotalFacts:   stats.TotalFacts,
+		TotalSize:    stats.TotalSize,
+		DeletedFacts: stats.DeletedFacts,
+		DeletedSize:  stats.DeletedSize,
+		Directories:  dirs,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (ws *WebServer) handleCreateFact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Content) == "" {
+		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Content) > 1024*1024 {
+		http.Error(w, "Content exceeds 1MB limit", http.StatusBadRequest)
+		return
+	}
+	if len(req.Tags) > 50 {
+		http.Error(w, "Maximum 50 tags allowed", http.StatusBadRequest)
+		return
+	}
+	for _, tag := range req.Tags {
+		if len(tag) > 256 {
+			http.Error(w, "Tag exceeds 256 character limit", http.StatusBadRequest)
+			return
+		}
+	}
+
+	fact, err := ws.store.AddFact(req.Content, req.Tags, ws.workDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create fact: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	preview := fact.Content
+	if len(preview) > 100 {
+		preview = preview[:97] + "..."
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(FactData{
+		ID:        fact.ID,
+		Content:   fact.Content,
+		Preview:   preview,
+		Tags:      fact.Tags,
+		SourceDir: fact.SourceDir,
+		ShortDir:  shortenPath(fact.SourceDir, 30),
+		IsLocal:   fact.SourceDir == ws.workDir,
+		CreatedAt: fact.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+func (ws *WebServer) handleUpdateFact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID      int64    `json:"id"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID <= 0 {
+		http.Error(w, "Invalid fact ID", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Content) > 1024*1024 {
+		http.Error(w, "Content exceeds 1MB limit", http.StatusBadRequest)
+		return
+	}
+	if len(req.Tags) > 50 {
+		http.Error(w, "Maximum 50 tags allowed", http.StatusBadRequest)
+		return
+	}
+	for _, tag := range req.Tags {
+		if len(tag) > 256 {
+			http.Error(w, "Tag exceeds 256 character limit", http.StatusBadRequest)
+			return
+		}
+	}
+
+	fact, err := ws.store.UpdateFact(req.ID, req.Content, req.Tags)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update fact: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	preview := fact.Content
+	if len(preview) > 100 {
+		preview = preview[:97] + "..."
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(FactData{
+		ID:        fact.ID,
+		Content:   fact.Content,
+		Preview:   preview,
+		Tags:      fact.Tags,
+		SourceDir: fact.SourceDir,
+		ShortDir:  shortenPath(fact.SourceDir, 30),
+		IsLocal:   fact.SourceDir == ws.workDir,
+		CreatedAt: fact.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+func (ws *WebServer) handleBulkDeleteFacts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		http.Error(w, "No IDs provided", http.StatusBadRequest)
+		return
+	}
+
+	deleted, err := ws.store.BulkSoftDeleteFacts(req.IDs)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to bulk delete facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"deleted": deleted})
+}
+
+func (ws *WebServer) handlePurgeDeleted(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	purged, err := ws.store.PurgeDeletedFacts()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to purge deleted facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"purged": purged})
+}
+
+func (ws *WebServer) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	timeRange := r.URL.Query().Get("range")
+	if timeRange == "" {
+		timeRange = "30d"
+	}
+
+	data, err := ws.store.GetAnalytics(timeRange)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get analytics: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+// GraphResponse represents the knowledge graph API response
+type GraphResponse struct {
+	Nodes []GraphNode `json:"nodes"`
+	Edges []GraphEdge `json:"edges"`
+}
+
+type GraphNode struct {
+	ID        int64    `json:"id"`
+	Label     string   `json:"label"`
+	Tags      []string `json:"tags"`
+	SourceDir string   `json:"sourceDir"`
+	IsOrphan  bool     `json:"isOrphan"`
+}
+
+type GraphEdge struct {
+	Source int64  `json:"source"`
+	Target int64  `json:"target"`
+	Weight int    `json:"weight"`
+	Label  string `json:"label"`
+}
+
+func (ws *WebServer) handleGraph(w http.ResponseWriter, r *http.Request) {
+	facts, err := ws.store.GetAllFacts()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Build tag index: tag -> list of fact IDs
+	tagIndex := make(map[string][]int64)
+	for _, f := range facts {
+		for _, tag := range f.Tags {
+			tagIndex[tag] = append(tagIndex[tag], f.ID)
+		}
+	}
+
+	// Build nodes
+	nodes := make([]GraphNode, len(facts))
+	for i, f := range facts {
+		label := f.Content
+		if len(label) > 60 {
+			label = label[:57] + "..."
+		}
+		nodes[i] = GraphNode{
+			ID:        f.ID,
+			Label:     label,
+			Tags:      f.Tags,
+			SourceDir: f.SourceDir,
+		}
+	}
+
+	// Build edges for facts sharing tags (skip tags with >50 facts)
+	type edgeKey struct{ a, b int64 }
+	edgeMap := make(map[edgeKey]*GraphEdge)
+
+	for tag, factIDs := range tagIndex {
+		if len(factIDs) > 50 {
+			continue // too generic
+		}
+		for i := 0; i < len(factIDs); i++ {
+			for j := i + 1; j < len(factIDs); j++ {
+				a, b := factIDs[i], factIDs[j]
+				if a > b {
+					a, b = b, a
+				}
+				key := edgeKey{a, b}
+				if e, ok := edgeMap[key]; ok {
+					e.Weight++
+					e.Label += ", " + tag
+				} else {
+					edgeMap[key] = &GraphEdge{
+						Source: a,
+						Target: b,
+						Weight: 1,
+						Label:  tag,
+					}
+				}
+			}
+		}
+	}
+
+	edges := make([]GraphEdge, 0, len(edgeMap))
+	for _, e := range edgeMap {
+		edges = append(edges, *e)
+	}
+
+	// Mark orphans: no edges and alone in their directory
+	connectedFacts := make(map[int64]bool)
+	for _, e := range edges {
+		connectedFacts[e.Source] = true
+		connectedFacts[e.Target] = true
+	}
+	dirCounts := make(map[string]int)
+	for _, f := range facts {
+		dirCounts[f.SourceDir]++
+	}
+	for i := range nodes {
+		if !connectedFacts[nodes[i].ID] && dirCounts[nodes[i].SourceDir] <= 1 {
+			nodes[i].IsOrphan = true
+		}
+	}
+
+	resp := GraphResponse{Nodes: nodes, Edges: edges}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (ws *WebServer) handleImportFacts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Limit body to 10MB
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+
+	var req struct {
+		Facts []store.BulkFact `json:"facts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Facts) == 0 {
+		http.Error(w, "No facts provided", http.StatusBadRequest)
+		return
+	}
+	if len(req.Facts) > 1000 {
+		http.Error(w, "Maximum 1000 facts per import", http.StatusBadRequest)
+		return
+	}
+
+	// Validate each fact
+	for i, f := range req.Facts {
+		if strings.TrimSpace(f.Content) == "" {
+			http.Error(w, fmt.Sprintf("Fact %d has empty content", i), http.StatusBadRequest)
+			return
+		}
+	}
+
+	imported, err := ws.store.BulkAddFacts(req.Facts, ws.workDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to import facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"imported": len(imported)})
+}
+
+func (ws *WebServer) handleContextWindow(w http.ResponseWriter, r *http.Request) {
+	instanceID := r.URL.Query().Get("instance")
+	if instanceID == "" {
+		http.Error(w, "instance parameter required", http.StatusBadRequest)
+		return
+	}
+
+	inst, err := ws.store.GetInstance(instanceID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Instance not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Mirror what get_context does: local facts (up to 50) + unread messages
+	facts, err := ws.store.GetFacts("", nil, inst.Directory, 50)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	messages, err := ws.store.GetMessages(instanceID, true)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get messages: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var items []store.ContextWindowItem
+	factTokens := 0
+	for _, f := range facts {
+		chars := len(f.Content)
+		tokens := chars / 4
+		factTokens += tokens
+		preview := f.Content
+		if len(preview) > 80 {
+			preview = preview[:77] + "..."
+		}
+		items = append(items, store.ContextWindowItem{
+			Type:    "fact",
+			ID:      f.ID,
+			Preview: preview,
+			Chars:   chars,
+			Tokens:  tokens,
+		})
+	}
+
+	messageTokens := 0
+	for _, m := range messages {
+		chars := len(m.Content)
+		tokens := chars / 4
+		messageTokens += tokens
+		preview := m.Content
+		if len(preview) > 80 {
+			preview = preview[:77] + "..."
+		}
+		items = append(items, store.ContextWindowItem{
+			Type:    "message",
+			ID:      m.ID,
+			Preview: preview,
+			Chars:   chars,
+			Tokens:  tokens,
+		})
+	}
+
+	// System overhead: header text, sibling listing, formatting (~1100 tokens)
+	systemTokens := 1100
+
+	// Sort items by tokens descending
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			if items[j].Tokens > items[i].Tokens {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+	}
+
+	data := store.ContextWindowData{
+		InstanceID:    instanceID,
+		Directory:     inst.Directory,
+		TotalTokens:   factTokens + messageTokens + systemTokens,
+		MaxTokens:     200000,
+		FactCount:     len(facts),
+		FactTokens:    factTokens,
+		MessageCount:  len(messages),
+		MessageTokens: messageTokens,
+		SystemTokens:  systemTokens,
+		Items:         items,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
 
 func (ws *WebServer) handleTerminal(w http.ResponseWriter, r *http.Request) {
