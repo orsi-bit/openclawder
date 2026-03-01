@@ -1368,6 +1368,137 @@ func (s *SQLiteStore) MarkMessageRead(id int64) error {
 	return err
 }
 
+// GetAnalytics returns time-series analytics data for facts, messages, and sessions
+func (s *SQLiteStore) GetAnalytics(timeRange string) (*AnalyticsData, error) {
+	data := &AnalyticsData{
+		FactsByDirectory: make(map[string]int),
+	}
+
+	// Determine date filter
+	var dateFilter string
+	switch timeRange {
+	case "7d":
+		dateFilter = "AND created_at >= datetime('now', '-7 days')"
+	case "30d":
+		dateFilter = "AND created_at >= datetime('now', '-30 days')"
+	case "90d":
+		dateFilter = "AND created_at >= datetime('now', '-90 days')"
+	default:
+		dateFilter = "" // all time
+	}
+
+	// Facts by date
+	rows, err := s.db.Query(fmt.Sprintf(`
+		SELECT DATE(created_at) as d, COUNT(*) as c
+		FROM facts WHERE deleted_at IS NULL %s
+		GROUP BY d ORDER BY d
+	`, dateFilter))
+	if err != nil {
+		return nil, fmt.Errorf("facts by date: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var dc DateCount
+		if err := rows.Scan(&dc.Date, &dc.Count); err != nil {
+			return nil, err
+		}
+		data.FactsByDate = append(data.FactsByDate, dc)
+		data.TotalFacts += dc.Count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Messages by date
+	rows2, err := s.db.Query(fmt.Sprintf(`
+		SELECT DATE(created_at) as d, COUNT(*) as c
+		FROM messages WHERE 1=1 %s
+		GROUP BY d ORDER BY d
+	`, dateFilter))
+	if err != nil {
+		return nil, fmt.Errorf("messages by date: %w", err)
+	}
+	defer func() { _ = rows2.Close() }()
+	for rows2.Next() {
+		var dc DateCount
+		if err := rows2.Scan(&dc.Date, &dc.Count); err != nil {
+			return nil, err
+		}
+		data.MessagesByDate = append(data.MessagesByDate, dc)
+		data.TotalMessages += dc.Count
+	}
+	if err := rows2.Err(); err != nil {
+		return nil, err
+	}
+
+	// Sessions by date (instances started_at)
+	rows3, err := s.db.Query(fmt.Sprintf(`
+		SELECT DATE(started_at) as d, COUNT(*) as c
+		FROM instances WHERE 1=1 %s
+		GROUP BY d ORDER BY d
+	`, strings.ReplaceAll(dateFilter, "created_at", "started_at")))
+	if err != nil {
+		return nil, fmt.Errorf("sessions by date: %w", err)
+	}
+	defer func() { _ = rows3.Close() }()
+	for rows3.Next() {
+		var dc DateCount
+		if err := rows3.Scan(&dc.Date, &dc.Count); err != nil {
+			return nil, err
+		}
+		data.SessionsByDate = append(data.SessionsByDate, dc)
+		data.TotalSessions += dc.Count
+	}
+	if err := rows3.Err(); err != nil {
+		return nil, err
+	}
+
+	// Facts by directory
+	rows4, err := s.db.Query(`
+		SELECT source_dir, COUNT(*) FROM facts
+		WHERE deleted_at IS NULL
+		GROUP BY source_dir ORDER BY COUNT(*) DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("facts by directory: %w", err)
+	}
+	defer func() { _ = rows4.Close() }()
+	for rows4.Next() {
+		var dir string
+		var count int
+		if err := rows4.Scan(&dir, &count); err != nil {
+			return nil, err
+		}
+		data.FactsByDirectory[dir] = count
+	}
+	if err := rows4.Err(); err != nil {
+		return nil, err
+	}
+
+	// This week vs last week trends
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM facts
+		WHERE deleted_at IS NULL AND created_at >= datetime('now', '-7 days')
+	`).Scan(&data.FactsThisWeek)
+
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM facts
+		WHERE deleted_at IS NULL AND created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days')
+	`).Scan(&data.FactsLastWeek)
+
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM messages
+		WHERE created_at >= datetime('now', '-7 days')
+	`).Scan(&data.MessagesThisWeek)
+
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM messages
+		WHERE created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days')
+	`).Scan(&data.MessagesLastWeek)
+
+	return data, nil
+}
+
 func (s *SQLiteStore) Close() error {
 	if s.index != nil {
 		_ = s.index.Close()

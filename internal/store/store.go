@@ -56,6 +56,46 @@ type Message struct {
 	ReadAt       *time.Time `json:"read_at,omitempty"`
 }
 
+type DateCount struct {
+	Date  string `json:"date"`
+	Count int    `json:"count"`
+}
+
+type AnalyticsData struct {
+	FactsByDate      []DateCount    `json:"facts_by_date"`
+	MessagesByDate   []DateCount    `json:"messages_by_date"`
+	SessionsByDate   []DateCount    `json:"sessions_by_date"`
+	FactsByDirectory map[string]int `json:"facts_by_directory"`
+	TotalFacts       int            `json:"total_facts"`
+	TotalMessages    int            `json:"total_messages"`
+	TotalSessions    int            `json:"total_sessions"`
+	FactsThisWeek    int            `json:"facts_this_week"`
+	FactsLastWeek    int            `json:"facts_last_week"`
+	MessagesThisWeek int            `json:"messages_this_week"`
+	MessagesLastWeek int            `json:"messages_last_week"`
+}
+
+type ContextWindowItem struct {
+	Type    string `json:"type"`    // "fact", "message", "system"
+	ID      int64  `json:"id"`
+	Preview string `json:"preview"`
+	Chars   int    `json:"chars"`
+	Tokens  int    `json:"tokens"` // chars / 4
+}
+
+type ContextWindowData struct {
+	InstanceID    string              `json:"instance_id"`
+	Directory     string              `json:"directory"`
+	TotalTokens   int                 `json:"total_tokens"`
+	MaxTokens     int                 `json:"max_tokens"`     // 200000
+	FactCount     int                 `json:"fact_count"`
+	FactTokens    int                 `json:"fact_tokens"`
+	MessageCount  int                 `json:"message_count"`
+	MessageTokens int                 `json:"message_tokens"`
+	SystemTokens  int                 `json:"system_tokens"`  // estimated overhead
+	Items         []ContextWindowItem `json:"items"`
+}
+
 type Store interface {
 	// Facts
 	AddFact(content string, tags []string, sourceDir string) (*Fact, error)
@@ -96,6 +136,9 @@ type Store interface {
 	GetMessages(toInstance string, unreadOnly bool) ([]Message, error)
 	GetAllMessages(limit int) ([]Message, error)
 	MarkMessageRead(id int64) error
+
+	// Analytics
+	GetAnalytics(timeRange string) (*AnalyticsData, error)
 
 	// Lifecycle
 	Close() error
