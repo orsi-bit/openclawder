@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -117,12 +118,38 @@ type StatsData struct {
 	LocalFacts       int `json:"localFacts"`
 }
 
+// FactStatsAPIResponse represents the fact statistics API response
+type FactStatsAPIResponse struct {
+	TotalFacts   int             `json:"totalFacts"`
+	TotalSize    int             `json:"totalSize"`
+	DeletedFacts int             `json:"deletedFacts"`
+	DeletedSize  int             `json:"deletedSize"`
+	Directories  []DirStatsEntry `json:"directories"`
+}
+
+// DirStatsEntry represents per-directory statistics
+type DirStatsEntry struct {
+	Directory string `json:"directory"`
+	ShortDir  string `json:"shortDir"`
+	Count     int    `json:"count"`
+	Size      int    `json:"size"`
+	Oldest    string `json:"oldest"`
+	Newest    string `json:"newest"`
+	OldestAge string `json:"oldestAge"`
+	NewestAge string `json:"newestAge"`
+}
+
 // Start starts the web server on the given port
 func (ws *WebServer) Start(port int) error {
 	http.HandleFunc("/", ws.handleDashboard)
 	http.HandleFunc("/api/data", ws.handleAPIData)
 	http.HandleFunc("/api/launch", ws.handleLaunch)
 	http.HandleFunc("/api/facts/delete", ws.handleDeleteFact)
+	http.HandleFunc("/api/facts/stats", ws.handleFactStats)
+	http.HandleFunc("/api/facts/create", ws.handleCreateFact)
+	http.HandleFunc("/api/facts/update", ws.handleUpdateFact)
+	http.HandleFunc("/api/facts/bulk-delete", ws.handleBulkDeleteFacts)
+	http.HandleFunc("/api/facts/purge", ws.handlePurgeDeleted)
 	http.HandleFunc("/api/terminal", ws.handleTerminal)
 
 	addr := fmt.Sprintf(":%d", port)
@@ -247,6 +274,205 @@ func (ws *WebServer) handleDeleteFact(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func (ws *WebServer) handleFactStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := ws.store.GetFactStats()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get fact stats: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	dirs := make([]DirStatsEntry, 0, len(stats.ByDirectory))
+	for dir, ds := range stats.ByDirectory {
+		dirs = append(dirs, DirStatsEntry{
+			Directory: dir,
+			ShortDir:  shortenPath(dir, 30),
+			Count:     ds.Count,
+			Size:      ds.Size,
+			Oldest:    ds.Oldest.Format(time.RFC3339),
+			Newest:    ds.Newest.Format(time.RFC3339),
+			OldestAge: formatDuration(time.Since(ds.Oldest)),
+			NewestAge: formatDuration(time.Since(ds.Newest)),
+		})
+	}
+
+	resp := FactStatsAPIResponse{
+		TotalFacts:   stats.TotalFacts,
+		TotalSize:    stats.TotalSize,
+		DeletedFacts: stats.DeletedFacts,
+		DeletedSize:  stats.DeletedSize,
+		Directories:  dirs,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (ws *WebServer) handleCreateFact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Content) == "" {
+		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Content) > 1024*1024 {
+		http.Error(w, "Content exceeds 1MB limit", http.StatusBadRequest)
+		return
+	}
+	if len(req.Tags) > 50 {
+		http.Error(w, "Maximum 50 tags allowed", http.StatusBadRequest)
+		return
+	}
+	for _, tag := range req.Tags {
+		if len(tag) > 256 {
+			http.Error(w, "Tag exceeds 256 character limit", http.StatusBadRequest)
+			return
+		}
+	}
+
+	fact, err := ws.store.AddFact(req.Content, req.Tags, ws.workDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create fact: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	preview := fact.Content
+	if len(preview) > 100 {
+		preview = preview[:97] + "..."
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(FactData{
+		ID:        fact.ID,
+		Content:   fact.Content,
+		Preview:   preview,
+		Tags:      fact.Tags,
+		SourceDir: fact.SourceDir,
+		ShortDir:  shortenPath(fact.SourceDir, 30),
+		IsLocal:   fact.SourceDir == ws.workDir,
+		CreatedAt: fact.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+func (ws *WebServer) handleUpdateFact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID      int64    `json:"id"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID <= 0 {
+		http.Error(w, "Invalid fact ID", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Content) > 1024*1024 {
+		http.Error(w, "Content exceeds 1MB limit", http.StatusBadRequest)
+		return
+	}
+	if len(req.Tags) > 50 {
+		http.Error(w, "Maximum 50 tags allowed", http.StatusBadRequest)
+		return
+	}
+	for _, tag := range req.Tags {
+		if len(tag) > 256 {
+			http.Error(w, "Tag exceeds 256 character limit", http.StatusBadRequest)
+			return
+		}
+	}
+
+	fact, err := ws.store.UpdateFact(req.ID, req.Content, req.Tags)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update fact: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	preview := fact.Content
+	if len(preview) > 100 {
+		preview = preview[:97] + "..."
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(FactData{
+		ID:        fact.ID,
+		Content:   fact.Content,
+		Preview:   preview,
+		Tags:      fact.Tags,
+		SourceDir: fact.SourceDir,
+		ShortDir:  shortenPath(fact.SourceDir, 30),
+		IsLocal:   fact.SourceDir == ws.workDir,
+		CreatedAt: fact.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+func (ws *WebServer) handleBulkDeleteFacts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		http.Error(w, "No IDs provided", http.StatusBadRequest)
+		return
+	}
+
+	deleted, err := ws.store.BulkSoftDeleteFacts(req.IDs)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to bulk delete facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"deleted": deleted})
+}
+
+func (ws *WebServer) handlePurgeDeleted(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	purged, err := ws.store.PurgeDeletedFacts()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to purge deleted facts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"purged": purged})
 }
 
 func (ws *WebServer) handleTerminal(w http.ResponseWriter, r *http.Request) {
