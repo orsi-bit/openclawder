@@ -21,24 +21,26 @@ import (
 var wrapInstanceName string
 
 func init() {
-	wrapCmd.Flags().StringVar(&wrapInstanceName, "name", "", "Instance name for multi-instance setups (e.g., 'backend', 'frontend')")
+	wrapCmd.Flags().StringVarP(&wrapInstanceName, "name", "n", "", "Instance name for multi-instance setups (e.g., 'backend', 'frontend')")
 }
 
 var wrapCmd = &cobra.Command{
-	Use:   "wrap [claude args...]",
+	Use:   "wrap [flags] [-- claude args...]",
 	Short: "Run Claude Code with clauder wrapper",
 	Long: `Runs Claude Code as a subprocess with full terminal passthrough.
 
 This wrapper mode allows clauder to intercept and augment Claude Code sessions.
-All arguments are passed directly to the claude command.
+Use -- to separate clauder flags from arguments passed to Claude Code.
 
 The wrapper monitors for incoming messages from other Claude instances and
 automatically prompts Claude to check them when the input line is empty.
 
 Examples:
-  clauder wrap                    # Start interactive Claude Code session
-  clauder wrap -p "fix the bug"   # Pass a prompt to Claude Code
-  clauder wrap --resume           # Resume previous session`,
+  clauder wrap                              # Start interactive Claude Code session
+  clauder wrap -- -p "fix the bug"          # Pass a prompt to Claude Code
+  clauder wrap -- --resume                  # Resume previous session
+  clauder wrap --name backend               # Named instance
+  clauder wrap --name backend -- --resume   # Named instance with claude args`,
 	DisableFlagParsing: true,
 	RunE:               runWrap,
 }
@@ -242,13 +244,65 @@ func (w *messageWatcher) inject(text string) {
 	_, _ = w.ptmx.WriteString("\r")
 }
 
-func runWrap(cmd *cobra.Command, args []string) error {
-	// Handle help flag manually since we disabled flag parsing
-	for _, arg := range args {
-		if arg == "-h" || arg == "--help" {
-			return cmd.Help()
+// parseWrapArgs splits args into clauder flags and claude args using "--" as separator.
+// Everything before "--" is parsed for clauder flags (--name, --help).
+// Everything after "--" is passed directly to claude.
+// If no "--" is present, all args are passed to claude for backwards compatibility.
+func parseWrapArgs(args []string) (name string, claudeArgs []string, help bool) {
+	// Find the "--" separator
+	sepIdx := -1
+	for i, arg := range args {
+		if arg == "--" {
+			sepIdx = i
+			break
 		}
 	}
+
+	var clauderArgs []string
+	if sepIdx >= 0 {
+		clauderArgs = args[:sepIdx]
+		claudeArgs = args[sepIdx+1:]
+	} else {
+		// No separator: check if any args look like clauder flags
+		// For backwards compat, if no clauder flags are present, pass everything to claude
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--name" || args[i] == "-n" {
+				clauderArgs = append(clauderArgs, args[i])
+				if i+1 < len(args) {
+					i++
+					clauderArgs = append(clauderArgs, args[i])
+				}
+			} else if args[i] == "-h" || args[i] == "--help" {
+				clauderArgs = append(clauderArgs, args[i])
+			} else {
+				claudeArgs = append(claudeArgs, args[i])
+			}
+		}
+	}
+
+	// Parse clauder flags
+	for i := 0; i < len(clauderArgs); i++ {
+		switch clauderArgs[i] {
+		case "--name", "-n":
+			if i+1 < len(clauderArgs) {
+				i++
+				name = clauderArgs[i]
+			}
+		case "-h", "--help":
+			help = true
+		}
+	}
+
+	return name, claudeArgs, help
+}
+
+func runWrap(cmd *cobra.Command, args []string) error {
+	// Parse clauder flags vs claude args
+	name, claudeArgs, showHelp := parseWrapArgs(args)
+	if showHelp {
+		return cmd.Help()
+	}
+	wrapInstanceName = name
 
 	// Check if stdin is a terminal
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -274,8 +328,8 @@ func runWrap(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = s.Close() }()
 
-	// Create the claude command with all passed arguments
-	c := exec.Command("claude", args...)
+	// Create the claude command with claude-specific arguments
+	c := exec.Command("claude", claudeArgs...)
 	c.Dir = workDir
 
 	// Pass instance name to inner session via environment variable
