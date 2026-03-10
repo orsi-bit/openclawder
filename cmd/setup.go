@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/maorbril/clauder/internal/telemetry"
+	"github.com/orsi-bit/openclawder/internal/telemetry"
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
@@ -30,8 +30,8 @@ var (
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Add clauder MCP server to AI coding tools",
-	Long: `Adds clauder as an MCP server to various AI coding tool configurations.
+	Short: "Add openclawder MCP server to AI coding tools",
+	Long: `Adds openclawder as an MCP server to various AI coding tool configurations.
 
 By default, adds to the global Claude Code config (~/.claude.json).
 
@@ -55,7 +55,7 @@ func init() {
 	setupCmd.Flags().BoolVar(&setupCursor, "cursor", false, "Add to Cursor editor config (~/.cursor/mcp.json)")
 	setupCmd.Flags().BoolVar(&setupWindsurf, "windsurf", false, "Add to Windsurf editor config (~/.codeium/windsurf/mcp_config.json)")
 	setupCmd.Flags().BoolVar(&setupOpenclaw, "openclaw", false, "Add to OpenClaw agent workspace (~/.openclaw/)")
-	setupCmd.Flags().BoolVarP(&setupAllowAll, "allow-all", "a", false, "Pre-approve all clauder commands (no permission prompts)")
+	setupCmd.Flags().BoolVarP(&setupAllowAll, "allow-all", "a", false, "Pre-approve all openclawder commands (no permission prompts)")
 	setupCmd.Flags().BoolVar(&setupSkipClaude, "skip-claude-md", false, "Skip adding instructions to CLAUDE.md")
 }
 
@@ -78,7 +78,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	// Find the clauder binary path
 	binaryPath, err := getBinaryPath()
 	if err != nil {
-		return fmt.Errorf("failed to find clauder binary: %w", err)
+		return fmt.Errorf("failed to find openclawder binary: %w", err)
 	}
 
 	// Determine which config file to use
@@ -117,7 +117,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// Ask about pre-approving commands if not specified via flag
 	if !setupAllowAll {
-		setupAllowAll = askYesNo("Pre-approve all clauder commands? (no permission prompts)")
+		setupAllowAll = askYesNo("Pre-approve all openclawder commands? (no permission prompts)")
 	}
 
 	// Setup MCP config
@@ -135,7 +135,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// Setup CLAUDE.md unless skipped
 	if !setupSkipClaude {
-		if err := setupClaudeMD(); err != nil {
+		if err := setupOpenclawderMD(); err != nil {
 			fmt.Printf("Warning: failed to update CLAUDE.md: %v\n", err)
 		}
 	}
@@ -145,7 +145,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 func getBinaryPath() (string, error) {
 	// First try to find in PATH
-	path, err := exec.LookPath("clauder")
+	path, err := exec.LookPath("openclawder")
 	if err == nil {
 		return filepath.Abs(path)
 	}
@@ -185,7 +185,7 @@ func setupGlobalConfig(binaryPath string) error {
 	}
 
 	// Add clauder
-	mcpServers["clauder"] = map[string]interface{}{
+	mcpServers["openclawder"] = map[string]interface{}{
 		"command": binaryPath,
 		"args":    []string{"serve"},
 	}
@@ -209,10 +209,10 @@ func setupGlobalConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	if setupAllowAll {
-		fmt.Println("Pre-approved all clauder MCP commands.")
+		fmt.Println("Pre-approved all openclawder MCP commands.")
 	}
 	fmt.Println("\nRestart Claude Code to load the new MCP server.")
 	return nil
@@ -239,7 +239,7 @@ func setupProjectConfig(binaryPath string) error {
 	}
 
 	// Add clauder
-	config.McpServers["clauder"] = MCPServer{
+	config.McpServers["openclawder"] = MCPServer{
 		Command: binaryPath,
 		Args:    []string{"serve"},
 	}
@@ -254,7 +254,7 @@ func setupProjectConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart Claude Code to load the new MCP server.")
 	return nil
@@ -287,7 +287,7 @@ func setupOpencodeConfig(binaryPath string) error {
 	}
 
 	// Add clauder with OpenCode's format
-	mcp["clauder"] = map[string]interface{}{
+	mcp["openclawder"] = map[string]interface{}{
 		"type":    "local",
 		"command": []string{binaryPath, "serve"},
 		"enabled": true,
@@ -304,7 +304,7 @@ func setupOpencodeConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart OpenCode to load the new MCP server.")
 	return nil
@@ -343,7 +343,7 @@ func setupCodexConfig(binaryPath string) error {
 	}
 
 	// Add clauder with Codex's format
-	mcpServers["clauder"] = map[string]interface{}{
+	mcpServers["openclawder"] = map[string]interface{}{
 		"command": binaryPath,
 		"args":    []string{"serve"},
 	}
@@ -359,7 +359,7 @@ func setupCodexConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart Codex to load the new MCP server.")
 	return nil
@@ -398,7 +398,7 @@ func setupGeminiConfig(binaryPath string) error {
 	}
 
 	// Add clauder with Gemini CLI's format
-	mcpServers["clauder"] = map[string]interface{}{
+	mcpServers["openclawder"] = map[string]interface{}{
 		"command": binaryPath,
 		"args":    []string{"serve"},
 	}
@@ -414,7 +414,7 @@ func setupGeminiConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart Gemini CLI to load the new MCP server.")
 	return nil
@@ -452,7 +452,7 @@ func setupCursorConfig(binaryPath string) error {
 	}
 
 	// Add clauder
-	config.McpServers["clauder"] = MCPServer{
+	config.McpServers["openclawder"] = MCPServer{
 		Command: binaryPath,
 		Args:    []string{"serve"},
 	}
@@ -467,7 +467,7 @@ func setupCursorConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart Cursor to load the new MCP server.")
 	return nil
@@ -505,7 +505,7 @@ func setupWindsurfConfig(binaryPath string) error {
 	}
 
 	// Add clauder
-	config.McpServers["clauder"] = MCPServer{
+	config.McpServers["openclawder"] = MCPServer{
 		Command: binaryPath,
 		Args:    []string{"serve"},
 	}
@@ -520,13 +520,13 @@ func setupWindsurfConfig(binaryPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Added clauder to %s\n", configPath)
+	fmt.Printf("Added openclawder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart Windsurf to load the new MCP server.")
 	return nil
 }
 
-// setupOpenClawConfig configures clauder for OpenClaw agent workspaces
+// setupOpenClawConfig configures openclawder for OpenClaw agent workspaces
 func setupOpenClawConfig(binaryPath string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -560,7 +560,7 @@ func setupOpenClawConfig(binaryPath string) error {
 		}
 
 		// Setup CLAUDE.md in the workspace for spawned Claude Code sub-agents
-		if err := setupClaudeMDAt(ws); err != nil {
+		if err := setupOpenclawderMDAt(ws); err != nil {
 			fmt.Printf("Warning: failed to update CLAUDE.md in %s: %v\n", ws, err)
 		}
 
@@ -574,14 +574,14 @@ func setupOpenClawConfig(binaryPath string) error {
 	}
 
 	// Print success summary
-	fmt.Println("\n=== OpenClaw + clauder setup complete ===")
+	fmt.Println("\n=== OpenClaw + openclawder setup complete ===")
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nConfigured workspaces:")
 	for _, ws := range configured {
 		fmt.Printf("  - %s (AGENTS.md + CLAUDE.md)\n", ws)
 	}
 	fmt.Printf("\nAgent instructions: %s\n", openclawMDPath)
-	fmt.Println("\nThe main OpenClaw agent can use clauder CLI commands.")
+	fmt.Println("\nThe main OpenClaw agent can use openclawder CLI commands.")
 	fmt.Println("Spawned Claude Code sub-agents get MCP tools via CLAUDE.md.")
 
 	return nil
@@ -686,41 +686,41 @@ func extractWorkspacePaths(config map[string]interface{}) []string {
 	return paths
 }
 
-// setupAgentsMD appends clauder CLI instructions to AGENTS.md in the given workspace
+// setupAgentsMD appends openclawder CLI instructions to AGENTS.md in the given workspace
 func setupAgentsMD(workspaceDir, binaryPath string) error {
 	agentsMDPath := filepath.Join(workspaceDir, "AGENTS.md")
 
 	instructions := `
-## Clauder CLI — Persistent Memory & Cross-Instance Coordination
+## OpenClawder CLI — Persistent Memory & Cross-Instance Coordination
 
-The main OpenClaw agent uses the clauder CLI directly (not MCP tools).
+The main OpenClaw agent uses the openclawder CLI directly (not MCP tools).
 Binary location: ` + binaryPath + `
 
 ### Available Commands
-- ` + "`clauder instances`" + ` — List running Claude Code sub-agent sessions
-- ` + "`clauder send <instance-id> \"message\"`" + ` — Send a message to a running sub-agent
-- ` + "`clauder recall \"query\"`" + ` — Search stored facts and decisions
-- ` + "`clauder remember \"fact\"`" + ` — Store a fact persistently
-- ` + "`clauder status`" + ` — View stored facts count and running instances
-- ` + "`clauder messages`" + ` — Check incoming messages
+- ` + "`openclawder instances`" + ` — List running Claude Code sub-agent sessions
+- ` + "`openclawder send <instance-id> \"message\"`" + ` — Send a message to a running sub-agent
+- ` + "`openclawder recall \"query\"`" + ` — Search stored facts and decisions
+- ` + "`openclawder remember \"fact\"`" + ` — Store a fact persistently
+- ` + "`openclawder status`" + ` — View stored facts count and running instances
+- ` + "`openclawder messages`" + ` — Check incoming messages
 
 ### When to Use
-- **Before spawning a sub-agent**: ` + "`clauder remember \"Starting task: <description>\"`" + `
-- **To check on a running agent**: ` + "`clauder instances`" + ` then ` + "`clauder send <id> \"status?\"`" + `
-- **After an agent finishes**: ` + "`clauder recall \"<task>\"`" + ` to retrieve what it stored
+- **Before spawning a sub-agent**: ` + "`openclawder remember \"Starting task: <description>\"`" + `
+- **To check on a running agent**: ` + "`openclawder instances`" + ` then ` + "`openclawder send <id> \"status?\"`" + `
+- **After an agent finishes**: ` + "`openclawder recall \"<task>\"`" + ` to retrieve what it stored
 - **If restarting an agent**: New agent will call ` + "`get_context`" + ` and resume automatically
 
 ### Note
 Spawned Claude Code sub-agents get MCP tools via CLAUDE.md — they should call
-` + "`mcp__clauder__get_context`" + ` at session start and ` + "`mcp__clauder__remember`" + ` after key decisions.
+` + "`mcp__openclawder__get_context`" + ` at session start and ` + "`mcp__openclawder__remember`" + ` after key decisions.
 `
 
 	var content string
 	data, err := os.ReadFile(agentsMDPath)
 	if err == nil {
 		content = string(data)
-		if strings.Contains(content, "## Clauder CLI") {
-			fmt.Printf("AGENTS.md in %s already contains clauder instructions.\n", workspaceDir)
+		if strings.Contains(content, "## OpenClawder CLI") {
+			fmt.Printf("AGENTS.md in %s already contains openclawder instructions.\n", workspaceDir)
 			return nil
 		}
 		content = content + "\n" + instructions
@@ -734,22 +734,22 @@ Spawned Claude Code sub-agents get MCP tools via CLAUDE.md — they should call
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)
 	}
 
-	fmt.Printf("Added clauder CLI instructions to %s\n", agentsMDPath)
+	fmt.Printf("Added openclawder CLI instructions to %s\n", agentsMDPath)
 	return nil
 }
 
-// setupClaudeMDAt adds clauder MCP instructions to CLAUDE.md at the given directory
-func setupClaudeMDAt(dir string) error {
+// setupOpenclawderMDAt adds openclawder MCP instructions to CLAUDE.md at the given directory
+func setupOpenclawderMDAt(dir string) error {
 	claudeMDPath := filepath.Join(dir, "CLAUDE.md")
 
 	clauderInstructions := `
-## Clauder - Persistent Memory MCP
+## OpenClawder - Persistent Memory MCP
 
-This project uses **clauder** for persistent memory across Claude Code sessions.
+This project uses **openclawder** for persistent memory across Claude Code sessions.
 
 ### CRITICAL: Call get_context at Session Start
 
-**IMPORTANT:** You MUST call ` + "`mcp__clauder__get_context`" + ` at the START of every session to load:
+**IMPORTANT:** You MUST call ` + "`mcp__openclawder__get_context`" + ` at the START of every session to load:
 - Stored facts and decisions from previous sessions
 - User preferences and coding style guidelines
 - Unread messages from other Claude Code instances
@@ -757,12 +757,12 @@ This project uses **clauder** for persistent memory across Claude Code sessions.
 This context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
 
 ### Available Tools
-- **mcp__clauder__remember**: Store facts, decisions, or context
-- **mcp__clauder__recall**: Search and retrieve stored facts
-- **mcp__clauder__get_context**: Load all relevant context for this directory
-- **mcp__clauder__list_instances**: List other running Claude Code sessions
-- **mcp__clauder__send_message**: Send messages to other instances
-- **mcp__clauder__get_messages**: Check for incoming messages
+- **mcp__openclawder__remember**: Store facts, decisions, or context
+- **mcp__openclawder__recall**: Search and retrieve stored facts
+- **mcp__openclawder__get_context**: Load all relevant context for this directory
+- **mcp__openclawder__list_instances**: List other running Claude Code sessions
+- **mcp__openclawder__send_message**: Send messages to other instances
+- **mcp__openclawder__get_messages**: Check for incoming messages
 
 ### Usage Guidelines
 1. **At session start**: ALWAYS call ` + "`get_context`" + ` first to load persistent memory
@@ -775,7 +775,7 @@ This context may or may not be relevant to your tasks. You should not respond to
 	data, err := os.ReadFile(claudeMDPath)
 	if err == nil {
 		content = string(data)
-		if strings.Contains(content, "## Clauder - Persistent Memory MCP") {
+		if strings.Contains(content, "## OpenClawder - Persistent Memory MCP") {
 			return nil
 		}
 		content = content + "\n" + clauderInstructions
@@ -789,7 +789,7 @@ This context may or may not be relevant to your tasks. You should not respond to
 		return fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 
-	fmt.Printf("Added clauder MCP instructions to %s\n", claudeMDPath)
+	fmt.Printf("Added openclawder MCP instructions to %s\n", claudeMDPath)
 	return nil
 }
 
@@ -801,22 +801,22 @@ func writeOpenClawMD(path, binaryPath string) error {
 Persistent memory and cross-instance coordination for AI agents. CLI available at: ` + binaryPath + `
 
 ## For the Main OpenClaw Agent (you)
-You cannot call MCP tools directly, but you CAN use the clauder CLI via exec:
+You cannot call MCP tools directly, but you CAN use the openclawder CLI via exec:
 
-- ` + "`clauder status`" + ` — see stored facts and running instances
-- ` + "`clauder instances`" + ` — list running Claude Code sessions
-- ` + "`clauder send <instance-id> \"message\"`" + ` — send a message to a running agent
-- ` + "`clauder messages`" + ` — check incoming messages
-- ` + "`clauder recall \"query\"`" + ` — search stored facts
-- ` + "`clauder remember \"fact\"`" + ` — store a fact persistently
+- ` + "`openclawder status`" + ` — see stored facts and running instances
+- ` + "`openclawder instances`" + ` — list running Claude Code sessions
+- ` + "`openclawder send <instance-id> \"message\"`" + ` — send a message to a running agent
+- ` + "`openclawder messages`" + ` — check incoming messages
+- ` + "`openclawder recall \"query\"`" + ` — search stored facts
+- ` + "`openclawder remember \"fact\"`" + ` — store a fact persistently
 
 ## For Claude Code Sub-Agents (Boaz, etc.)
-They get MCP tools automatically via CLAUDE.md. They should call ` + "`mcp__clauder__get_context`" + ` at session start and ` + "`mcp__clauder__remember`" + ` after key decisions.
+They get MCP tools automatically via CLAUDE.md. They should call ` + "`mcp__openclawder__get_context`" + ` at session start and ` + "`mcp__openclawder__remember`" + ` after key decisions.
 
 ## When to Use
-- Before spawning an agent: ` + "`clauder remember \"Starting task: <description>\"`" + `
-- To check on a running agent: ` + "`clauder instances`" + ` then ` + "`clauder send <id> \"status update?\"`" + `
-- After an agent finishes: ` + "`clauder recall \"<task>\"`" + ` to retrieve what it stored
+- Before spawning an agent: ` + "`openclawder remember \"Starting task: <description>\"`" + `
+- To check on a running agent: ` + "`openclawder instances`" + ` then ` + "`openclawder send <id> \"status update?\"`" + `
+- After an agent finishes: ` + "`openclawder recall \"<task>\"`" + ` to retrieve what it stored
 - If you need to kill and restart: new agent will ` + "`get_context`" + ` and resume automatically
 `
 
@@ -850,7 +850,7 @@ func addGetContextPermission(config map[string]interface{}) {
 	// Check if already added
 	for _, p := range permissions {
 		if pMap, ok := p.(map[string]interface{}); ok {
-			if pMap["tool"] == "mcp__clauder__get_context" {
+			if pMap["tool"] == "mcp__openclawder__get_context" {
 				return // Already exists
 			}
 		}
@@ -858,7 +858,7 @@ func addGetContextPermission(config map[string]interface{}) {
 
 	// Add get_context permission
 	permissions = append(permissions, map[string]interface{}{
-		"tool":  "mcp__clauder__get_context",
+		"tool":  "mcp__openclawder__get_context",
 		"allow": true,
 	})
 	config["permissions"] = permissions
@@ -874,12 +874,12 @@ func addPermissionRules(config map[string]interface{}) {
 
 	// Clauder MCP tools to allow
 	clauderTools := []string{
-		"mcp__clauder__remember",
-		"mcp__clauder__recall",
-		"mcp__clauder__get_context",
-		"mcp__clauder__list_instances",
-		"mcp__clauder__send_message",
-		"mcp__clauder__get_messages",
+		"mcp__openclawder__remember",
+		"mcp__openclawder__recall",
+		"mcp__openclawder__get_context",
+		"mcp__openclawder__list_instances",
+		"mcp__openclawder__send_message",
+		"mcp__openclawder__get_messages",
 	}
 
 	// Add permission rules for each tool
@@ -894,18 +894,18 @@ func addPermissionRules(config map[string]interface{}) {
 	config["permissions"] = permissions
 }
 
-// setupClaudeMD adds clauder instructions to CLAUDE.md
-func setupClaudeMD() error {
+// setupOpenclawderMD adds openclawder instructions to CLAUDE.md
+func setupOpenclawderMD() error {
 	claudeMDPath := "CLAUDE.md"
 
 	clauderInstructions := `
-## Clauder - Persistent Memory MCP
+## OpenClawder - Persistent Memory MCP
 
-This project uses **clauder** for persistent memory across Claude Code sessions.
+This project uses **openclawder** for persistent memory across Claude Code sessions.
 
 ### CRITICAL: Call get_context at Session Start
 
-**IMPORTANT:** You MUST call ` + "`mcp__clauder__get_context`" + ` at the START of every session to load:
+**IMPORTANT:** You MUST call ` + "`mcp__openclawder__get_context`" + ` at the START of every session to load:
 - Stored facts and decisions from previous sessions
 - User preferences and coding style guidelines
 - Unread messages from other Claude Code instances
@@ -913,12 +913,12 @@ This project uses **clauder** for persistent memory across Claude Code sessions.
 This context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
 
 ### Available Tools
-- **mcp__clauder__remember**: Store facts, decisions, or context
-- **mcp__clauder__recall**: Search and retrieve stored facts
-- **mcp__clauder__get_context**: Load all relevant context for this directory
-- **mcp__clauder__list_instances**: List other running Claude Code sessions
-- **mcp__clauder__send_message**: Send messages to other instances
-- **mcp__clauder__get_messages**: Check for incoming messages
+- **mcp__openclawder__remember**: Store facts, decisions, or context
+- **mcp__openclawder__recall**: Search and retrieve stored facts
+- **mcp__openclawder__get_context**: Load all relevant context for this directory
+- **mcp__openclawder__list_instances**: List other running Claude Code sessions
+- **mcp__openclawder__send_message**: Send messages to other instances
+- **mcp__openclawder__get_messages**: Check for incoming messages
 
 ### Usage Guidelines
 1. **At session start**: ALWAYS call ` + "`get_context`" + ` first to load persistent memory
@@ -933,8 +933,8 @@ This context may or may not be relevant to your tasks. You should not respond to
 	if err == nil {
 		content = string(data)
 		// Check if clauder section already exists
-		if strings.Contains(content, "## Clauder - Persistent Memory MCP") {
-			fmt.Println("CLAUDE.md already contains clauder instructions.")
+		if strings.Contains(content, "## OpenClawder - Persistent Memory MCP") {
+			fmt.Println("CLAUDE.md already contains openclawder instructions.")
 			return nil
 		}
 		// Append to existing content
@@ -950,6 +950,6 @@ This context may or may not be relevant to your tasks. You should not respond to
 		return fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 
-	fmt.Printf("Added clauder instructions to %s\n", claudeMDPath)
+	fmt.Printf("Added openclawder instructions to %s\n", claudeMDPath)
 	return nil
 }
