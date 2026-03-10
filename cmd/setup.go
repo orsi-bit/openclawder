@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/maorbril/clauder/internal/telemetry"
@@ -22,6 +23,7 @@ var (
 	setupGemini     bool
 	setupCursor     bool
 	setupWindsurf   bool
+	setupOpenclaw   bool
 	setupAllowAll   bool
 	setupSkipClaude bool
 )
@@ -39,7 +41,8 @@ Supported tools:
   --codex     OpenAI Codex CLI (~/.codex/config.toml)
   --gemini    Google Gemini CLI (~/.gemini/settings.json)
   --cursor    Cursor editor (~/.cursor/mcp.json)
-  --windsurf  Windsurf editor (~/.codeium/windsurf/mcp_config.json)`,
+  --windsurf  Windsurf editor (~/.codeium/windsurf/mcp_config.json)
+  --openclaw  OpenClaw agent workspace (~/.openclaw/)`,
 	RunE: runSetup,
 }
 
@@ -51,6 +54,7 @@ func init() {
 	setupCmd.Flags().BoolVar(&setupGemini, "gemini", false, "Add to Google Gemini CLI config (~/.gemini/settings.json)")
 	setupCmd.Flags().BoolVar(&setupCursor, "cursor", false, "Add to Cursor editor config (~/.cursor/mcp.json)")
 	setupCmd.Flags().BoolVar(&setupWindsurf, "windsurf", false, "Add to Windsurf editor config (~/.codeium/windsurf/mcp_config.json)")
+	setupCmd.Flags().BoolVar(&setupOpenclaw, "openclaw", false, "Add to OpenClaw agent workspace (~/.openclaw/)")
 	setupCmd.Flags().BoolVarP(&setupAllowAll, "allow-all", "a", false, "Pre-approve all clauder commands (no permission prompts)")
 	setupCmd.Flags().BoolVar(&setupSkipClaude, "skip-claude-md", false, "Skip adding instructions to CLAUDE.md")
 }
@@ -78,9 +82,15 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine which config file to use
-	if !setupGlobal && !setupProject && !setupOpencode && !setupCodex && !setupGemini && !setupCursor && !setupWindsurf {
+	if !setupGlobal && !setupProject && !setupOpencode && !setupCodex && !setupGemini && !setupCursor && !setupWindsurf && !setupOpenclaw {
 		// Default to global
 		setupGlobal = true
+	}
+
+	// Handle OpenClaw setup
+	if setupOpenclaw {
+		telemetry.TrackSetup("openclaw")
+		return setupOpenClawConfig(binaryPath)
 	}
 
 	// Handle non-Claude Code setups (simpler - no permission prompts or CLAUDE.md)
@@ -513,6 +523,308 @@ func setupWindsurfConfig(binaryPath string) error {
 	fmt.Printf("Added clauder to %s\n", configPath)
 	fmt.Printf("Binary: %s\n", binaryPath)
 	fmt.Println("\nRestart Windsurf to load the new MCP server.")
+	return nil
+}
+
+// setupOpenClawConfig configures clauder for OpenClaw agent workspaces
+func setupOpenClawConfig(binaryPath string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	openclawDir := filepath.Join(home, ".openclaw")
+	configPath := filepath.Join(openclawDir, "openclaw.json")
+
+	// Discover workspace paths
+	workspaces := discoverOpenClawWorkspaces(configPath, openclawDir)
+
+	if len(workspaces) == 0 {
+		fmt.Println("No OpenClaw workspaces found. Using default: ~/.openclaw/workspace/")
+		defaultWs := filepath.Join(openclawDir, "workspace")
+		workspaces = []string{defaultWs}
+	}
+
+	var configured []string
+
+	for _, ws := range workspaces {
+		// Create workspace dir if it doesn't exist
+		if err := os.MkdirAll(ws, 0755); err != nil {
+			fmt.Printf("Warning: failed to create workspace %s: %v\n", ws, err)
+			continue
+		}
+
+		// Append CLI instructions to AGENTS.md
+		if err := setupAgentsMD(ws, binaryPath); err != nil {
+			fmt.Printf("Warning: failed to update AGENTS.md in %s: %v\n", ws, err)
+		}
+
+		// Setup CLAUDE.md in the workspace for spawned Claude Code sub-agents
+		if err := setupClaudeMDAt(ws); err != nil {
+			fmt.Printf("Warning: failed to update CLAUDE.md in %s: %v\n", ws, err)
+		}
+
+		configured = append(configured, ws)
+	}
+
+	// Write ~/OPENCLAW.md with instructions for the main OpenClaw agent
+	openclawMDPath := filepath.Join(home, "OPENCLAW.md")
+	if err := writeOpenClawMD(openclawMDPath, binaryPath); err != nil {
+		fmt.Printf("Warning: failed to write %s: %v\n", openclawMDPath, err)
+	}
+
+	// Print success summary
+	fmt.Println("\n=== OpenClaw + clauder setup complete ===")
+	fmt.Printf("Binary: %s\n", binaryPath)
+	fmt.Println("\nConfigured workspaces:")
+	for _, ws := range configured {
+		fmt.Printf("  - %s (AGENTS.md + CLAUDE.md)\n", ws)
+	}
+	fmt.Printf("\nAgent instructions: %s\n", openclawMDPath)
+	fmt.Println("\nThe main OpenClaw agent can use clauder CLI commands.")
+	fmt.Println("Spawned Claude Code sub-agents get MCP tools via CLAUDE.md.")
+
+	return nil
+}
+
+// discoverOpenClawWorkspaces parses ~/.openclaw/openclaw.json to find workspace paths,
+// or falls back to scanning for workspace directories.
+func discoverOpenClawWorkspaces(configPath, openclawDir string) []string {
+	var workspaces []string
+
+	data, err := os.ReadFile(configPath)
+	if err == nil {
+		// Strip single-line // comments and trailing commas for JSON5 compat
+		cleaned := stripJSON5(string(data))
+
+		var config map[string]interface{}
+		if err := json.Unmarshal([]byte(cleaned), &config); err == nil {
+			workspaces = extractWorkspacePaths(config)
+		}
+	}
+
+	if len(workspaces) > 0 {
+		// Expand ~ in paths
+		home, _ := os.UserHomeDir()
+		for i, ws := range workspaces {
+			if strings.HasPrefix(ws, "~") {
+				workspaces[i] = filepath.Join(home, ws[1:])
+			}
+		}
+		return workspaces
+	}
+
+	// Fallback: scan for workspace-* directories
+	entries, err := os.ReadDir(openclawDir)
+	if err != nil {
+		return nil
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "workspace") {
+			workspaces = append(workspaces, filepath.Join(openclawDir, entry.Name()))
+		}
+	}
+
+	return workspaces
+}
+
+// stripJSON5 removes single-line // comments and trailing commas from JSON5 text
+func stripJSON5(input string) string {
+	// Remove single-line comments (// ...) but not inside strings
+	re := regexp.MustCompile(`(?m)^\s*//.*$`)
+	result := re.ReplaceAllString(input, "")
+
+	// Also remove inline comments after values
+	reInline := regexp.MustCompile(`(?m)(["}\]0-9true false null]),?\s*//.*$`)
+	result = reInline.ReplaceAllString(result, "$1,")
+
+	// Remove trailing commas before } or ]
+	reTrailing := regexp.MustCompile(`,\s*([}\]])`)
+	result = reTrailing.ReplaceAllString(result, "$1")
+
+	return result
+}
+
+// extractWorkspacePaths extracts workspace paths from OpenClaw config
+func extractWorkspacePaths(config map[string]interface{}) []string {
+	var paths []string
+
+	agents, ok := config["agents"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Check agents.defaults.workspace
+	if defaults, ok := agents["defaults"].(map[string]interface{}); ok {
+		if ws, ok := defaults["workspace"].(string); ok {
+			paths = append(paths, ws)
+		}
+	}
+
+	// Check agents.list[*].workspace
+	if list, ok := agents["list"].([]interface{}); ok {
+		for _, item := range list {
+			if agent, ok := item.(map[string]interface{}); ok {
+				if ws, ok := agent["workspace"].(string); ok {
+					// Avoid duplicates
+					found := false
+					for _, p := range paths {
+						if p == ws {
+							found = true
+							break
+						}
+					}
+					if !found {
+						paths = append(paths, ws)
+					}
+				}
+			}
+		}
+	}
+
+	return paths
+}
+
+// setupAgentsMD appends clauder CLI instructions to AGENTS.md in the given workspace
+func setupAgentsMD(workspaceDir, binaryPath string) error {
+	agentsMDPath := filepath.Join(workspaceDir, "AGENTS.md")
+
+	instructions := `
+## Clauder CLI — Persistent Memory & Cross-Instance Coordination
+
+The main OpenClaw agent uses the clauder CLI directly (not MCP tools).
+Binary location: ` + binaryPath + `
+
+### Available Commands
+- ` + "`clauder instances`" + ` — List running Claude Code sub-agent sessions
+- ` + "`clauder send <instance-id> \"message\"`" + ` — Send a message to a running sub-agent
+- ` + "`clauder recall \"query\"`" + ` — Search stored facts and decisions
+- ` + "`clauder remember \"fact\"`" + ` — Store a fact persistently
+- ` + "`clauder status`" + ` — View stored facts count and running instances
+- ` + "`clauder messages`" + ` — Check incoming messages
+
+### When to Use
+- **Before spawning a sub-agent**: ` + "`clauder remember \"Starting task: <description>\"`" + `
+- **To check on a running agent**: ` + "`clauder instances`" + ` then ` + "`clauder send <id> \"status?\"`" + `
+- **After an agent finishes**: ` + "`clauder recall \"<task>\"`" + ` to retrieve what it stored
+- **If restarting an agent**: New agent will call ` + "`get_context`" + ` and resume automatically
+
+### Note
+Spawned Claude Code sub-agents get MCP tools via CLAUDE.md — they should call
+` + "`mcp__clauder__get_context`" + ` at session start and ` + "`mcp__clauder__remember`" + ` after key decisions.
+`
+
+	var content string
+	data, err := os.ReadFile(agentsMDPath)
+	if err == nil {
+		content = string(data)
+		if strings.Contains(content, "## Clauder CLI") {
+			fmt.Printf("AGENTS.md in %s already contains clauder instructions.\n", workspaceDir)
+			return nil
+		}
+		content = content + "\n" + instructions
+	} else if os.IsNotExist(err) {
+		content = "# Agent Instructions\n" + instructions
+	} else {
+		return fmt.Errorf("failed to read AGENTS.md: %w", err)
+	}
+
+	if err := os.WriteFile(agentsMDPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write AGENTS.md: %w", err)
+	}
+
+	fmt.Printf("Added clauder CLI instructions to %s\n", agentsMDPath)
+	return nil
+}
+
+// setupClaudeMDAt adds clauder MCP instructions to CLAUDE.md at the given directory
+func setupClaudeMDAt(dir string) error {
+	claudeMDPath := filepath.Join(dir, "CLAUDE.md")
+
+	clauderInstructions := `
+## Clauder - Persistent Memory MCP
+
+This project uses **clauder** for persistent memory across Claude Code sessions.
+
+### CRITICAL: Call get_context at Session Start
+
+**IMPORTANT:** You MUST call ` + "`mcp__clauder__get_context`" + ` at the START of every session to load:
+- Stored facts and decisions from previous sessions
+- User preferences and coding style guidelines
+- Unread messages from other Claude Code instances
+
+This context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+
+### Available Tools
+- **mcp__clauder__remember**: Store facts, decisions, or context
+- **mcp__clauder__recall**: Search and retrieve stored facts
+- **mcp__clauder__get_context**: Load all relevant context for this directory
+- **mcp__clauder__list_instances**: List other running Claude Code sessions
+- **mcp__clauder__send_message**: Send messages to other instances
+- **mcp__clauder__get_messages**: Check for incoming messages
+
+### Usage Guidelines
+1. **At session start**: ALWAYS call ` + "`get_context`" + ` first to load persistent memory
+2. **Store important info**: Use ` + "`remember`" + ` for decisions, architecture notes, preferences
+3. **Check messages regularly**: The system will notify you of unread messages in tool responses
+4. **Cross-instance communication**: Use ` + "`list_instances`" + ` and ` + "`send_message`" + ` to coordinate with other sessions
+`
+
+	var content string
+	data, err := os.ReadFile(claudeMDPath)
+	if err == nil {
+		content = string(data)
+		if strings.Contains(content, "## Clauder - Persistent Memory MCP") {
+			return nil
+		}
+		content = content + "\n" + clauderInstructions
+	} else if os.IsNotExist(err) {
+		content = "# Project Instructions\n" + clauderInstructions
+	} else {
+		return fmt.Errorf("failed to read CLAUDE.md: %w", err)
+	}
+
+	if err := os.WriteFile(claudeMDPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write CLAUDE.md: %w", err)
+	}
+
+	fmt.Printf("Added clauder MCP instructions to %s\n", claudeMDPath)
+	return nil
+}
+
+// writeOpenClawMD writes the ~/OPENCLAW.md file with instructions for the main OpenClaw agent
+func writeOpenClawMD(path, binaryPath string) error {
+	content := `# OpenClaw + OpenClawder Integration
+
+## What is openclawder?
+Persistent memory and cross-instance coordination for AI agents. CLI available at: ` + binaryPath + `
+
+## For the Main OpenClaw Agent (you)
+You cannot call MCP tools directly, but you CAN use the clauder CLI via exec:
+
+- ` + "`clauder status`" + ` — see stored facts and running instances
+- ` + "`clauder instances`" + ` — list running Claude Code sessions
+- ` + "`clauder send <instance-id> \"message\"`" + ` — send a message to a running agent
+- ` + "`clauder messages`" + ` — check incoming messages
+- ` + "`clauder recall \"query\"`" + ` — search stored facts
+- ` + "`clauder remember \"fact\"`" + ` — store a fact persistently
+
+## For Claude Code Sub-Agents (Boaz, etc.)
+They get MCP tools automatically via CLAUDE.md. They should call ` + "`mcp__clauder__get_context`" + ` at session start and ` + "`mcp__clauder__remember`" + ` after key decisions.
+
+## When to Use
+- Before spawning an agent: ` + "`clauder remember \"Starting task: <description>\"`" + `
+- To check on a running agent: ` + "`clauder instances`" + ` then ` + "`clauder send <id> \"status update?\"`" + `
+- After an agent finishes: ` + "`clauder recall \"<task>\"`" + ` to retrieve what it stored
+- If you need to kill and restart: new agent will ` + "`get_context`" + ` and resume automatically
+`
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write OPENCLAW.md: %w", err)
+	}
+
+	fmt.Printf("Wrote agent instructions to %s\n", path)
 	return nil
 }
 

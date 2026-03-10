@@ -136,6 +136,23 @@ clauder setup --gemini
 
 This adds clauder to `~/.gemini/settings.json`.
 
+### OpenClaw
+
+For [OpenClaw](https://openclaw.ai) agent workspaces:
+
+```bash
+clauder setup --openclaw
+```
+
+This configures all discovered OpenClaw agent workspaces (`~/.openclaw/workspace*`):
+- Adds clauder CLI instructions to `AGENTS.md` in each workspace (for the main agent)
+- Adds clauder MCP instructions to `CLAUDE.md` in each workspace (for spawned Claude Code sub-agents)
+- Writes `~/OPENCLAW.md` with integration instructions for the main OpenClaw agent
+
+The main OpenClaw agent uses CLI commands (`clauder instances`, `clauder send`, etc.) while spawned Claude Code sub-agents use MCP tools via CLAUDE.md.
+
+> Built as **openclawder** — a fork maintained by Bitpulse for the OpenClaw ecosystem.
+
 ## Usage
 
 ### CLI Commands
