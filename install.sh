@@ -2,9 +2,9 @@
 set -e
 
 # openclawder installer script
-# Usage: curl -sSL https://raw.githubusercontent.com/orsi-bit/openclawder/main/install.sh | sh
+# Usage: curl -sSL https://raw.githubusercontent.com/orsi-bit/openclawderr/main/install.sh | sh
 
-REPO="orsi-bit/openclawder"
+REPO="orsi-bit/openclawderr"
 INSTALL_DIR="${OPENCLAWDER_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS
@@ -26,11 +26,42 @@ detect_arch() {
     esac
 }
 
-# Get latest release tag
+# Get latest release tag via redirect (avoids JSON parsing issues under set -e)
 get_latest_version() {
-    curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | \
-        grep '"tag_name":' | \
-        sed -E 's/.*"([^"]+)".*/\1/'
+    # Follow the /releases/latest redirect and extract the tag from the final URL
+    LOCATION=$(curl -sSLI "https://github.com/${REPO}/releases/latest" 2>/dev/null | grep -i "^location:" | tail -1) || true
+    if [ -n "$LOCATION" ]; then
+        echo "$LOCATION" | sed -E 's|.*releases/tag/([^ \r\n]+).*|\1|' | tr -d '[:space:]'
+        return
+    fi
+    # Fallback: JSON API
+    curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | tr -d '[:space:]' || true
+}
+
+# Add install dir to shell profile if not already in PATH
+add_to_path() {
+    PROFILE=""
+    if [ -n "$ZSH_VERSION" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
+        PROFILE="$HOME/.zshrc"
+    elif [ -n "$BASH_VERSION" ] || [ "$(basename "$SHELL")" = "bash" ]; then
+        if [ -f "$HOME/.bash_profile" ]; then
+            PROFILE="$HOME/.bash_profile"
+        else
+            PROFILE="$HOME/.bashrc"
+        fi
+    else
+        PROFILE="$HOME/.profile"
+    fi
+
+    LINE="export PATH=\"\$PATH:$INSTALL_DIR\""
+    if [ -f "$PROFILE" ] && grep -qF "$INSTALL_DIR" "$PROFILE" 2>/dev/null; then
+        return  # already there
+    fi
+
+    printf '\n# openclawder\n%s\n' "$LINE" >> "$PROFILE"
+    echo "Added openclawder to PATH in $PROFILE"
+    echo "Restart your shell or run: source $PROFILE"
 }
 
 main() {
@@ -48,8 +79,13 @@ main() {
     VERSION=$(get_latest_version)
     if [ -z "$VERSION" ]; then
         echo "Error: Could not determine latest version"
+        echo "Check https://github.com/${REPO}/releases and try:"
+        echo "  OPENCLAWDER_VERSION=v0.1.0 sh install.sh"
         exit 1
     fi
+
+    # Allow version override
+    VERSION="${OPENCLAWDER_VERSION:-$VERSION}"
 
     echo "  OS: $OS"
     echo "  Arch: $ARCH"
@@ -74,9 +110,9 @@ main() {
     fi
 
     if command -v curl >/dev/null 2>&1; then
-        curl -sSL "$URL" -o "$DEST"
+        curl -fSL "$URL" -o "$DEST" || { echo "Error: Download failed. Check https://github.com/${REPO}/releases"; exit 1; }
     elif command -v wget >/dev/null 2>&1; then
-        wget -q "$URL" -O "$DEST"
+        wget -q "$URL" -O "$DEST" || { echo "Error: Download failed. Check https://github.com/${REPO}/releases"; exit 1; }
     else
         echo "Error: curl or wget required"
         exit 1
@@ -88,18 +124,17 @@ main() {
     echo ""
     echo "Installed openclawder to $DEST"
 
-    # Check if install dir is in PATH
+    # Auto-add to PATH if not already there
     case ":$PATH:" in
-        *":$INSTALL_DIR:"*) ;;
+        *":$INSTALL_DIR:"*)
+            echo "openclawder is already in your PATH."
+            ;;
         *)
-            echo ""
-            echo "Add openclawder to your PATH by adding this to your shell profile:"
-            echo ""
-            echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
-            echo ""
+            add_to_path
             ;;
     esac
 
+    echo ""
     echo "Run 'openclawder setup' to configure your AI coding tool."
 }
 
