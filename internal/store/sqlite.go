@@ -40,7 +40,7 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	dbPath := filepath.Join(dataDir, "clauder.db")
+	dbPath := filepath.Join(dataDir, "openclawder.db")
 	debugLog("[NewSQLiteStore] Opening database: %s", dbPath)
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *SQLiteStore) InitIndex(instanceID string) error {
 
 // debugLog writes debug output to stderr
 func debugLog(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "[clauder] "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "[openclawder] "+format+"\n", args...)
 }
 
 // cleanupStaleIndexes removes index directories for processes that are no longer running

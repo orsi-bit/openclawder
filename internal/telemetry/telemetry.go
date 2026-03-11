@@ -28,7 +28,7 @@ var (
 func Init() {
 	once.Do(func() {
 		// Check for opt-out
-		if os.Getenv("CLAUDER_NO_TELEMETRY") != "" || os.Getenv("DO_NOT_TRACK") == "1" {
+		if os.Getenv("OPENCLAWDER_NO_TELEMETRY") != "" || os.Getenv("DO_NOT_TRACK") == "1" {
 			disabled = true
 			return
 		}
@@ -145,7 +145,7 @@ func generateAnonID() string {
 	home, _ := os.UserHomeDir()
 	hostname, _ := os.Hostname()
 
-	data := home + hostname + "clauder-salt-v1"
+	data := home + hostname + "openclawder-salt-v1"
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:16])
 }

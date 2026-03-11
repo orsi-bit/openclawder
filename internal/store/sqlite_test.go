@@ -10,7 +10,7 @@ import (
 
 func setupTestStore(t *testing.T) (*SQLiteStore, func()) {
 	t.Helper()
-	tmpDir, err := os.MkdirTemp("", "clauder-test-*")
+	tmpDir, err := os.MkdirTemp("", "openclawder-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestGetFactStats_SizeCalculation(t *testing.T) {
 }
 
 func TestNewSQLiteStore_CreatesDirectory(t *testing.T) {
-	tmpDir := filepath.Join(os.TempDir(), "clauder-test-nonexistent")
+	tmpDir := filepath.Join(os.TempDir(), "openclawder-test-nonexistent")
 	_ = os.RemoveAll(tmpDir) // Ensure it doesn't exist
 
 	store, err := NewSQLiteStore(tmpDir)

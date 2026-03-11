@@ -8,12 +8,12 @@ import (
 	"os"
 	"sync"
 
-	"github.com/maorbril/clauder/internal/store"
+	"github.com/orsi-bit/openclawder/internal/store"
 )
 
 const (
 	ProtocolVersion = "2024-11-05"
-	ServerName      = "clauder"
+	ServerName      = "openclawder"
 	ServerVersion   = "0.9.1" // Keep in sync with cmd.Version
 )
 
@@ -127,12 +127,12 @@ func NewServer(s store.Store, instanceID, directoryID, workDir string) *Server {
 }
 
 func (s *Server) Run() error {
-	fmt.Fprintf(os.Stderr, "[clauder] MCP server ready, waiting for requests...\n")
+	fmt.Fprintf(os.Stderr, "[openclawder] MCP server ready, waiting for requests...\n")
 	for {
 		line, err := s.reader.ReadBytes('\n')
 		if err != nil {
 			if err == io.EOF {
-				fmt.Fprintf(os.Stderr, "[clauder] EOF received, shutting down\n")
+				fmt.Fprintf(os.Stderr, "[openclawder] EOF received, shutting down\n")
 				return nil
 			}
 			return fmt.Errorf("read error: %w", err)
@@ -144,9 +144,9 @@ func (s *Server) Run() error {
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "[clauder] Received request: method=%s\n", req.Method)
+		fmt.Fprintf(os.Stderr, "[openclawder] Received request: method=%s\n", req.Method)
 		s.handleRequest(&req)
-		fmt.Fprintf(os.Stderr, "[clauder] Finished handling: method=%s\n", req.Method)
+		fmt.Fprintf(os.Stderr, "[openclawder] Finished handling: method=%s\n", req.Method)
 	}
 }
 
@@ -260,7 +260,7 @@ func (s *Server) handleToolsList(req *Request) {
 		},
 		{
 			Name:        "get_global_context",
-			Description: "Get all stored facts across ALL directories/repositories. Use this when you need context from other projects or want a complete view of everything stored in clauder, regardless of the current working directory.",
+			Description: "Get all stored facts across ALL directories/repositories. Use this when you need context from other projects or want a complete view of everything stored in openclawder, regardless of the current working directory.",
 			InputSchema: InputSchema{
 				Type:       "object",
 				Properties: map[string]Property{},
@@ -268,7 +268,7 @@ func (s *Server) handleToolsList(req *Request) {
 		},
 		{
 			Name:        "list_instances",
-			Description: "List all running clauder instances across different directories. Use this to discover other Claude Code sessions you can communicate with.",
+			Description: "List all running openclawder instances across different directories. Use this to discover other Claude Code sessions you can communicate with.",
 			InputSchema: InputSchema{
 				Type:       "object",
 				Properties: map[string]Property{},
@@ -276,7 +276,7 @@ func (s *Server) handleToolsList(req *Request) {
 		},
 		{
 			Name:        "send_message",
-			Description: "Send a message to another running clauder instance. Use a full instance ID (with :name suffix) to target a specific instance, or use a directory ID (without suffix) to broadcast to all instances in that directory.",
+			Description: "Send a message to another running openclawder instance. Use a full instance ID (with :name suffix) to target a specific instance, or use a directory ID (without suffix) to broadcast to all instances in that directory.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]Property{
@@ -298,7 +298,7 @@ func (s *Server) handleToolsList(req *Request) {
 		},
 		{
 			Name:        "get_messages",
-			Description: "Get messages sent to this instance from other clauder instances.",
+			Description: "Get messages sent to this instance from other openclawder instances.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]Property{
